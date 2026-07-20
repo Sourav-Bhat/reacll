@@ -1,0 +1,124 @@
+import 'dart:async';
+import 'dart:io';
+
+import 'package:file_picker/file_picker.dart';
+import 'package:path/path.dart' as p;
+import 'package:receive_sharing_intent/receive_sharing_intent.dart';
+
+import '../db/database.dart';
+
+/// One incoming item, normalized. Audio => needs transcription;
+/// text => straight to transcripts (FR-3, skips whisper entirely).
+class IncomingItem {
+  final String kind; // 'audio' | 'text'
+  final String? filePath; // audio file copied into app storage
+  final String? text; // transcript text
+  final String suggestedTitle;
+  const IncomingItem({
+    required this.kind,
+    this.filePath,
+    this.text,
+    required this.suggestedTitle,
+  });
+}
+
+/// FR-2 + FR-3: share-sheet and file-picker ingestion.
+class ImportService {
+  ImportService._();
+  static final ImportService instance = ImportService._();
+
+  final _controller = StreamController<IncomingItem>.broadcast();
+  Stream<IncomingItem> get incoming => _controller.stream;
+  StreamSubscription? _sub;
+
+  static const _audioExt = {'.m4a', '.mp3', '.wav', '.aac', '.ogg', '.opus', '.flac'};
+
+  /// Call once at app start: handles both cold-start share and while-running share.
+  Future<void> init() async {
+    final initial = await ReceiveSharingIntent.instance.getInitialMedia();
+    for (final f in initial) {
+      await _handleShared(f);
+    }
+    ReceiveSharingIntent.instance.reset();
+    _sub = ReceiveSharingIntent.instance.getMediaStream().listen((files) async {
+      for (final f in files) {
+        await _handleShared(f);
+      }
+    });
+  }
+
+  Future<void> _handleShared(SharedMediaFile f) async {
+    if (f.type == SharedMediaType.text) {
+      final t = f.path; // for text shares, path carries the text payload
+      if (t.trim().isNotEmpty) {
+        _controller.add(IncomingItem(
+          kind: 'text',
+          text: t,
+          suggestedTitle: 'Imported transcript',
+        ));
+      }
+      return;
+    }
+    final ext = p.extension(f.path).toLowerCase();
+    if (_audioExt.contains(ext)) {
+      final copied = await _copyIntoMedia(f.path);
+      _controller.add(IncomingItem(
+        kind: 'audio',
+        filePath: copied,
+        suggestedTitle: p.basenameWithoutExtension(f.path),
+      ));
+    } else if (ext == '.txt' || ext == '.md' || ext == '.vtt' || ext == '.srt') {
+      final text = await File(f.path).readAsString();
+      _controller.add(IncomingItem(
+        kind: 'text',
+        text: text,
+        suggestedTitle: p.basenameWithoutExtension(f.path),
+      ));
+    }
+  }
+
+  /// Manual pick from the Add screen.
+  Future<IncomingItem?> pickAudioFile() async {
+    final res = await FilePicker.platform.pickFiles(type: FileType.audio);
+    final path = res?.files.single.path;
+    if (path == null) return null;
+    final copied = await _copyIntoMedia(path);
+    return IncomingItem(
+      kind: 'audio',
+      filePath: copied,
+      suggestedTitle: p.basenameWithoutExtension(path),
+    );
+  }
+
+  Future<String> _copyIntoMedia(String src) async {
+    final dir = await mediaDir();
+    final dest = p.join(dir.path,
+        '${DateTime.now().millisecondsSinceEpoch}_${p.basename(src)}');
+    await File(src).copy(dest);
+    return dest;
+  }
+
+  /// FR-4: attach an incoming item to a conversation (new or existing).
+  /// Returns (conversationId, needsTranscription).
+  (int, bool) attach(RecallDb db, IncomingItem item, {int? conversationId}) {
+    final convId = conversationId ??
+        db.createConversation(title: item.suggestedTitle);
+    if (item.kind == 'audio') {
+      db.addArtifact(convId, 'imported_audio',
+          filePath: item.filePath, status: 'pending');
+      return (convId, true);
+    } else {
+      final artId =
+          db.addArtifact(convId, 'transcript', status: 'done');
+      db.addTranscript(artId, convId, item.text!);
+      // Phase 2: imported transcripts go straight to extraction.
+      db.queueExtraction(convId);
+      return (convId, false);
+    }
+  }
+
+  void dispose() {
+    _sub?.cancel();
+    _controller.close();
+  }
+}
