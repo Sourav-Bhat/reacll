@@ -229,15 +229,24 @@ class _DetailScreenState extends State<DetailScreen> {
             ),
           ...failed.map((a) => Card(
                 child: ListTile(
+                  isThreeLine:
+                      TranscriptionService.instance.lastError != null,
                   leading:
                       Icon(Icons.error_outline, color: t.colorScheme.error),
                   title: const Text('Transcription failed'),
-                  trailing: FilledButton.tonal(
-                    onPressed: () async {
-                      await TranscriptionService.instance.retry(db, a.id);
-                      setState(() {});
-                    },
-                    child: const Text('Retry'),
+                  subtitle: TranscriptionService.instance.lastError != null
+                      ? Text(TranscriptionService.instance.lastError!,
+                          style: t.textTheme.bodySmall)
+                      : null,
+                  trailing: SizedBox(
+                    width: 85,
+                    child: FilledButton.tonal(
+                      onPressed: () async {
+                        await TranscriptionService.instance.retry(db, a.id);
+                        setState(() {});
+                      },
+                      child: const Text('Retry'),
+                    ),
                   ),
                 ),
               )),
