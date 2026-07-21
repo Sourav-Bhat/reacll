@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../main.dart';
 import '../services/extraction_service.dart';
+import '../services/sample_data.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -12,12 +13,14 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   late final TextEditingController _keyCtl;
+  bool _sampleLoaded = false;
 
   @override
   void initState() {
     super.initState();
     _keyCtl = TextEditingController(
         text: db.getSetting(ExtractionService.settingApiKey) ?? '');
+    _sampleLoaded = SampleData.isLoaded(db);
   }
 
   @override
@@ -70,6 +73,37 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ExtractionService.instance.pump(db);
             },
             child: const Text('Save'),
+          ),
+          const SizedBox(height: 34),
+          const Divider(),
+          const SizedBox(height: 12),
+          Text('Sample data', style: t.textTheme.titleMedium
+              ?.copyWith(fontWeight: FontWeight.w700)),
+          const SizedBox(height: 6),
+          Text(
+            'Loads one real imported conversation (an ESG phase-2 meeting, '
+            'transcribed on-device) plus its extracted commitments, decisions, '
+            'facts and threads — so you can try the full app on real content '
+            'without recording first. Safe to tap once.',
+            style: t.textTheme.bodyMedium
+                ?.copyWith(color: t.colorScheme.onSurfaceVariant, height: 1.5),
+          ),
+          const SizedBox(height: 14),
+          OutlinedButton.icon(
+            onPressed: _sampleLoaded
+                ? null
+                : () {
+                    final added = SampleData.load(db);
+                    setState(() => _sampleLoaded = true);
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                        content: Text(added
+                            ? 'Sample conversation loaded — see Talks'
+                            : 'Sample data was already loaded')));
+                  },
+            icon: Icon(_sampleLoaded ? Icons.check : Icons.science_outlined),
+            label: Text(_sampleLoaded
+                ? 'Sample data loaded'
+                : 'Load sample data'),
           ),
         ],
       ),

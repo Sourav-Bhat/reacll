@@ -1,0 +1,46 @@
+# --- OS / editor cruft ---
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# --- Secrets (never commit) ---
+# API keys live in the app's local DB, not in source. Guard against stray files.
+*.env
+.env*
+secrets.json
+**/api_key*.txt
+**/*.pem
+**/*.keystore
+key.properties
+
+# --- Flutter / Dart build output ---
+.dart_tool/
+.packages
+.pub-cache/
+.pub/
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+pubspec.lock
+
+# --- Android build output ---
+android/.gradle/
+android/local.properties
+android/app/debug/
+android/app/profile/
+android/app/release/
+*.iml
+
+# --- iOS (kept open per plan) ---
+ios/Pods/
+ios/.symlinks/
+ios/Flutter/Flutter.framework
+ios/Flutter/Flutter.podspec
+
+# --- Downloaded model blobs (whisper / sherpa-onnx) ---
+# Large binaries fetched at runtime; never version them.
+*.onnx
+*.ggml
+*.bin
+models/
