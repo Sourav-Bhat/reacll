@@ -131,7 +131,11 @@ Rules:
   static const _kinds = {'commitment', 'decision', 'fact', 'thread'};
 
   void _store(RecallDb db, int convId, Map<String, dynamic> json) {
-    final people = {for (final p in db.peopleList()) p.name.toLowerCase(): p.id};
+    // Names are not unique now — index name -> all matching person ids.
+    final byName = <String, List<int>>{};
+    for (final p in db.peopleList()) {
+      byName.putIfAbsent(p.name.toLowerCase(), () => []).add(p.id);
+    }
 
     for (final f in (json['facts'] as List? ?? const [])) {
       if (f is! Map) continue;
@@ -143,12 +147,13 @@ Rules:
       final conf = (f['confidence'] is num)
           ? (f['confidence'] as num).toDouble().clamp(0.0, 1.0)
           : 0.5;
-      // Person linking: exact NOCASE match AND decent confidence, else keep
-      // the raw name and let a clarification resolve it (AC: never file to
-      // the wrong person).
+      // Link only on a UNIQUE exact name match with decent confidence. If the
+      // name is ambiguous (two "Ravi"s) or unknown, keep the raw name and let a
+      // clarification resolve it — never file to the wrong person.
       int? personId;
       if (rawName != null && rawName.isNotEmpty && conf >= linkConfidence) {
-        personId = people[rawName.toLowerCase()];
+        final matches = byName[rawName.toLowerCase()];
+        if (matches != null && matches.length == 1) personId = matches.first;
       }
       db.addFact(
         conversationId: convId,

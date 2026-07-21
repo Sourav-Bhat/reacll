@@ -6,6 +6,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:sqlite3/sqlite3.dart';
 
 import '../models.dart';
+import 'migrations.dart';
 import 'schema.dart';
 
 /// Single-isolate data layer. All methods are synchronous (sqlite3 package),
@@ -20,16 +21,73 @@ class RecallDb {
     final dir = await getApplicationDocumentsDirectory();
     final path = p.join(dir.path, 'recall.db');
     final db = sqlite3.open(path);
-    db.execute(createSchema);
+    _prepare(db);
     _instance = RecallDb._(db);
     return _instance!;
+  }
+
+  /// Fresh install → create schema. Existing install on an older schema →
+  /// rebuild from scratch (data is disposable/reloadable — the agreed
+  /// reset-not-migrate approach). The Settings API key is preserved.
+  /// Migration runner (see db/migrations.dart). Fresh installs get the latest
+  /// baseline in one shot; existing databases replay only the migrations they
+  /// are missing, one version at a time.
+  static void _prepare(Database db) {
+    final hasCore = db
+        .select("SELECT 1 FROM sqlite_master "
+            "WHERE type='table' AND name='people'")
+        .isNotEmpty;
+
+    if (!hasCore) {
+      // Fresh install → latest schema directly, stamped at the current version.
+      db.execute(createSchema);
+      db.execute('PRAGMA user_version = $schemaVersion');
+      return;
+    }
+
+    // Existing DB. Determine its current version. Pre-framework builds never
+    // stamped user_version (it reads 0), so infer a baseline from the schema
+    // shape: a people.company column means it is already at v4.
+    var from =
+        (db.select('PRAGMA user_version').first['user_version'] as int?) ?? 0;
+    if (from == 0) {
+      final cols = db
+          .select('PRAGMA table_info(people)')
+          .map((r) => r['name'] as String)
+          .toSet();
+      from = cols.contains('company') ? 4 : 3;
+      db.execute('PRAGMA user_version = $from');
+    }
+
+    // Replay each missing migration in order.
+    for (var v = from + 1; v <= schemaVersion; v++) {
+      final migrate = migrations[v];
+      if (migrate == null) {
+        throw StateError('No migration registered for schema v$v '
+            '(add it to db/migrations.dart)');
+      }
+      migrate(db);
+      db.execute('PRAGMA user_version = $v');
+    }
   }
 
   /// Test-only constructor (in-memory).
   static RecallDb openInMemory() {
     final db = sqlite3.openInMemory();
     db.execute(createSchema);
+    db.execute('PRAGMA user_version = $schemaVersion');
     return RecallDb._(db);
+  }
+
+  /// Wipe all conversations, people and topics (keeps the API key). Used by the
+  /// Settings "reset local data" action before reloading the sample.
+  void resetLocalData() {
+    _db.execute('PRAGMA foreign_keys = ON');
+    _db.execute('DELETE FROM conversations');
+    _db.execute('DELETE FROM voice_prints');
+    _db.execute('DELETE FROM people');
+    _db.execute('DELETE FROM topics');
+    _db.execute("DELETE FROM settings WHERE key = 'sample_loaded'");
   }
 
   static String get dbFileName => 'recall.db';
@@ -74,14 +132,22 @@ class RecallDb {
   ConversationDetail detail(int id) {
     final c = _db.select(
         'SELECT id, title, happened_at, duration_sec FROM conversations WHERE id = ?', [id]).first;
-    final people = _db
+    List<Person> peopleByRole(String role) => _db
         .select(
-            'SELECT p.id, p.name FROM people p '
+            'SELECT p.id, p.name, p.company, p.role FROM people p '
             'JOIN conversation_people cp ON cp.person_id = p.id '
-            'WHERE cp.conversation_id = ? ORDER BY p.name COLLATE NOCASE',
-            [id])
-        .map((r) => Person(id: r['id'] as int, name: r['name'] as String))
+            'WHERE cp.conversation_id = ? AND cp.role = ? '
+            'ORDER BY p.name COLLATE NOCASE',
+            [id, role])
+        .map((r) => Person(
+              id: r['id'] as int,
+              name: r['name'] as String,
+              company: r['company'] as String?,
+              role: r['role'] as String?,
+            ))
         .toList();
+    final people = peopleByRole('attendee');
+    final mentioned = peopleByRole('mentioned');
     final topics = _db
         .select(
             'SELECT t.name FROM topics t JOIN conversation_topics ct ON ct.topic_id = t.id '
@@ -113,6 +179,7 @@ class RecallDb {
       happenedAt: DateTime.parse(c['happened_at'] as String),
       durationSec: (c['duration_sec'] as int?) ?? 0,
       people: people,
+      mentioned: mentioned,
       topics: topics,
       artifacts: artifacts,
       transcriptText: text,
@@ -159,24 +226,99 @@ class RecallDb {
 
   // ---------- people & topics ----------
 
+  static String? _nn(String? s) =>
+      (s == null || s.trim().isEmpty) ? null : s.trim();
+
+  /// Quick create-or-get by name (fallback path). With duplicate names allowed,
+  /// prefer [createPerson]/[getPerson] + the picker for disambiguation.
   int upsertPerson(String name) {
     final n = name.trim();
-    final existing = _db.select('SELECT id FROM people WHERE name = ? COLLATE NOCASE', [n]);
+    final existing =
+        _db.select('SELECT id FROM people WHERE name = ? COLLATE NOCASE', [n]);
     if (existing.isNotEmpty) return existing.first['id'] as int;
     _db.execute('INSERT INTO people (name) VALUES (?)', [n]);
     return _db.lastInsertRowId;
   }
 
-  void tagPerson(int conversationId, int personId) {
+  /// Create a full contact. Names are not unique — two "Ravi"s can coexist.
+  int createPerson({
+    required String name,
+    String? company,
+    String? role,
+    String? email,
+    String? notes,
+  }) {
     _db.execute(
-        'INSERT OR IGNORE INTO conversation_people (conversation_id, person_id) VALUES (?, ?)',
-        [conversationId, personId]);
+        'INSERT INTO people (name, company, role, email, notes) '
+        'VALUES (?, ?, ?, ?, ?)',
+        [name.trim(), _nn(company), _nn(role), _nn(email), _nn(notes)]);
+    return _db.lastInsertRowId;
+  }
+
+  Person? getPerson(int id) {
+    final r = _db.select(
+        'SELECT id, name, company, role, email, notes FROM people WHERE id = ?',
+        [id]);
+    if (r.isEmpty) return null;
+    final row = r.first;
+    return Person(
+      id: row['id'] as int,
+      name: row['name'] as String,
+      company: row['company'] as String?,
+      role: row['role'] as String?,
+      email: row['email'] as String?,
+      notes: row['notes'] as String?,
+    );
+  }
+
+  void updatePerson(int id, {
+    required String name,
+    String? company,
+    String? role,
+    String? email,
+    String? notes,
+  }) {
+    _db.execute(
+        'UPDATE people SET name=?, company=?, role=?, email=?, notes=? WHERE id=?',
+        [name.trim(), _nn(company), _nn(role), _nn(email), _nn(notes), id]);
+  }
+
+  /// Tag a person on a conversation. role 'attendee' (in the room) or
+  /// 'mentioned' (merely referenced). attendee always wins if both apply.
+  void tagPerson(int conversationId, int personId, {String role = 'attendee'}) {
+    _db.execute(
+        'INSERT INTO conversation_people (conversation_id, person_id, role) '
+        'VALUES (?, ?, ?) '
+        'ON CONFLICT(conversation_id, person_id) DO UPDATE SET role = '
+        "CASE WHEN conversation_people.role = 'attendee' "
+        "OR excluded.role = 'attendee' THEN 'attendee' ELSE 'mentioned' END",
+        [conversationId, personId, role]);
   }
 
   void untagPerson(int conversationId, int personId) {
     _db.execute(
         'DELETE FROM conversation_people WHERE conversation_id = ? AND person_id = ?',
         [conversationId, personId]);
+  }
+
+  /// Explicit merge (user-chosen), e.g. to fold a whisper-mangled duplicate
+  /// into the correct contact. Moves everything from [fromId] into [intoId].
+  void mergePerson(int fromId, int intoId) {
+    if (fromId == intoId) return;
+    _db.execute('UPDATE facts SET person_id = ? WHERE person_id = ?', [intoId, fromId]);
+    _db.execute('UPDATE segments SET person_id = ? WHERE person_id = ?', [intoId, fromId]);
+    _db.execute(
+        'UPDATE voice_prints SET person_id = ? WHERE person_id = ?', [intoId, fromId]);
+    // Move tags, keeping the strongest role (attendee > mentioned).
+    _db.execute(
+        'INSERT INTO conversation_people (conversation_id, person_id, role) '
+        'SELECT conversation_id, ?, role FROM conversation_people WHERE person_id = ? '
+        'ON CONFLICT(conversation_id, person_id) DO UPDATE SET role = '
+        "CASE WHEN conversation_people.role = 'attendee' OR excluded.role = 'attendee' "
+        "THEN 'attendee' ELSE 'mentioned' END",
+        [intoId, fromId]);
+    _db.execute('DELETE FROM conversation_people WHERE person_id = ?', [fromId]);
+    _db.execute('DELETE FROM people WHERE id = ?', [fromId]);
   }
 
   int upsertTopic(String name) {
@@ -199,20 +341,27 @@ class RecallDb {
         .map((r) => Person(
               id: r['id'] as int,
               name: r['name'] as String,
+              company: r['company'] as String?,
+              role: r['role'] as String?,
               convoCount: (r['convo_count'] as int?) ?? 0,
             ))
         .toList();
   }
 
+  /// Conversations a person ATTENDED (Talks tab). Mentions surface via facts.
   List<ConversationSummary> personConversations(int personId) {
-    return _db.select(personConvosSql, [personId]).map((r) => ConversationSummary(
-          id: r['id'] as int,
-          title: r['title'] as String,
-          happenedAt: DateTime.parse(r['happened_at'] as String),
-          durationSec: (r['duration_sec'] as int?) ?? 0,
-          peopleNames: '',
-          busy: false,
-        )).toList();
+    return _db
+        .select(personConvosSql, [personId])
+        .where((r) => (r['role'] as String?) == 'attendee')
+        .map((r) => ConversationSummary(
+              id: r['id'] as int,
+              title: r['title'] as String,
+              happenedAt: DateTime.parse(r['happened_at'] as String),
+              durationSec: (r['duration_sec'] as int?) ?? 0,
+              peopleNames: '',
+              busy: false,
+            ))
+        .toList();
   }
 
   // ---------- search (FR-7) ----------

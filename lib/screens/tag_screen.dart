@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../main.dart';
+import 'person_form.dart';
 
 /// FR-6: exactly two questions — who + what — completable in <=10s, skippable.
 class TagScreen extends StatefulWidget {
@@ -22,30 +23,8 @@ class _TagScreenState extends State<TagScreen> {
   }
 
   Future<void> _newPerson() async {
-    final ctl = TextEditingController();
-    final name = await showDialog<String>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('New person'),
-        content: TextField(
-          controller: ctl,
-          autofocus: true,
-          decoration: const InputDecoration(hintText: 'Name'),
-          textCapitalization: TextCapitalization.words,
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-          FilledButton(
-              onPressed: () => Navigator.pop(context, ctl.text),
-              child: const Text('Add')),
-        ],
-      ),
-    );
-    if (name != null && name.trim().isNotEmpty) {
-      final id = db.upsertPerson(name);
-      setState(() => _selected.add(id));
-    }
+    final id = await showPersonForm(context);
+    if (id != null) setState(() => _selected.add(id));
   }
 
   void _save({bool skip = false}) {
@@ -89,7 +68,7 @@ class _TagScreenState extends State<TagScreen> {
               runSpacing: 9,
               children: [
                 ...people.map((p) => FilterChip(
-                      label: Text(p.name),
+                      label: Text(p.label),
                       selected: _selected.contains(p.id),
                       onSelected: (sel) => setState(() =>
                           sel ? _selected.add(p.id) : _selected.remove(p.id)),

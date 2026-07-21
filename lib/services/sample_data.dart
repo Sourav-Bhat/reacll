@@ -22,8 +22,12 @@ class SampleData {
     // NB: whisper mis-transcribed "Sourav" as Surab/Zuraab throughout the
     // audio — a real, load-bearing failure mode for a person-indexed app.
     // We tag the correct person here; the transcript keeps the raw errors.
-    final andy = db.upsertPerson('Andy');
-    final sourav = db.upsertPerson('Sourav');
+    final andy = db.createPerson(
+        name: 'Andy', company: 'Sonnetix', role: 'ESG Lead');
+    final sourav = db.createPerson(
+        name: 'Sourav',
+        company: 'Sonnetix',
+        role: 'Innovation Architect / FDE');
 
     final when = DateTime(2026, 6, 25, 10, 30);
     final convId = db.createConversation(

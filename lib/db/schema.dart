@@ -3,16 +3,25 @@
 /// so keep it standard SQL (no Dart interpolation).
 library;
 
-const schemaVersion = 3;
+const schemaVersion = 4;
 
 const createSchema = '''
 PRAGMA foreign_keys = ON;
 
+-- People are full contact records. Names are NOT globally unique — two
+-- different "Ravi"s (different companies) can coexist and are disambiguated
+-- by company/role. The UI picks the right one; the AI never auto-links an
+-- ambiguous bare name.
 CREATE TABLE IF NOT EXISTS people (
   id          INTEGER PRIMARY KEY,
-  name        TEXT NOT NULL UNIQUE COLLATE NOCASE,
+  name        TEXT NOT NULL COLLATE NOCASE,
+  company     TEXT,
+  role        TEXT,
+  email       TEXT,
+  notes       TEXT,
   created_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
+CREATE INDEX IF NOT EXISTS idx_people_name ON people(name COLLATE NOCASE);
 
 CREATE TABLE IF NOT EXISTS conversations (
   id            INTEGER PRIMARY KEY,
@@ -44,9 +53,13 @@ CREATE TABLE IF NOT EXISTS transcripts (
 );
 CREATE INDEX IF NOT EXISTS idx_transcripts_conv ON transcripts(conversation_id);
 
+-- role distinguishes who was actually in the room ('attendee') from people
+-- merely referenced ('mentioned'). attendee always wins if both apply.
 CREATE TABLE IF NOT EXISTS conversation_people (
   conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
   person_id       INTEGER NOT NULL REFERENCES people(id) ON DELETE CASCADE,
+  role            TEXT NOT NULL DEFAULT 'attendee'
+                  CHECK (role IN ('attendee','mentioned')),
   PRIMARY KEY (conversation_id, person_id)
 );
 
@@ -209,11 +222,11 @@ ORDER BY CASE f.kind
 LIMIT 30;
 ''';
 
-/// Last-met date for a person.
+/// Last-met date for a person — only meetings they actually attended.
 const lastMetSql = '''
 SELECT max(c.happened_at) FROM conversations c
 JOIN conversation_people cp ON cp.conversation_id = c.id
-WHERE cp.person_id = ?;
+WHERE cp.person_id = ? AND cp.role = 'attendee';
 ''';
 
 /// Open clarifications for a conversation (FR-11 + FR-15 speaker questions).
@@ -287,7 +300,7 @@ const homeListSql = '''
 SELECT c.id, c.title, c.happened_at, c.duration_sec,
        (SELECT group_concat(p.name, ', ')
           FROM conversation_people cp JOIN people p ON p.id = cp.person_id
-         WHERE cp.conversation_id = c.id)              AS people_names,
+         WHERE cp.conversation_id = c.id AND cp.role = 'attendee') AS people_names,
        (SELECT count(*) FROM artifacts a
          WHERE a.conversation_id = c.id AND a.status IN ('pending','transcribing')) AS busy
 FROM conversations c
@@ -295,20 +308,22 @@ ORDER BY c.happened_at DESC
 LIMIT ? OFFSET ?;
 ''';
 
-/// Person page: conversations for one person.
+/// Person page: conversations, with the person's role in each (attended/mentioned).
 const personConvosSql = '''
-SELECT c.id, c.title, c.happened_at, c.duration_sec
+SELECT c.id, c.title, c.happened_at, c.duration_sec, cp.role
 FROM conversations c
 JOIN conversation_people cp ON cp.conversation_id = c.id
 WHERE cp.person_id = ?
 ORDER BY c.happened_at DESC;
 ''';
 
-/// People list with conversation counts.
+/// People list with attended-conversation counts and contact fields.
 const peopleListSql = '''
-SELECT p.id, p.name, count(cp.conversation_id) AS convo_count
+SELECT p.id, p.name, p.company, p.role,
+       count(cp.conversation_id) AS convo_count
 FROM people p
-LEFT JOIN conversation_people cp ON cp.person_id = p.id
+LEFT JOIN conversation_people cp
+       ON cp.person_id = p.id AND cp.role = 'attendee'
 GROUP BY p.id
 ORDER BY convo_count DESC, p.name COLLATE NOCASE;
 ''';

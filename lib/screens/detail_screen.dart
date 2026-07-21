@@ -6,6 +6,8 @@ import '../models.dart';
 import '../services/extraction_service.dart';
 import '../services/transcription_service.dart';
 import '../services/voice_id_service.dart';
+import 'people_screen.dart';
+import 'person_form.dart';
 import 'tag_screen.dart';
 
 class DetailScreen extends StatefulWidget {
@@ -34,10 +36,10 @@ class _DetailScreenState extends State<DetailScreen> {
     super.dispose();
   }
 
-  /// FR-15: speaker question -> person picker -> enrollment.
-  Future<void> _answerSpeaker(Clarification q) async {
+  /// Shared person picker: existing people + inline "new person". Returns id.
+  Future<int?> _pickPerson(String title) {
     final people = db.peopleList();
-    final personId = await showModalBottomSheet<int>(
+    return showModalBottomSheet<int>(
       context: context,
       showDragHandle: true,
       builder: (context) => SafeArea(
@@ -45,50 +47,47 @@ class _DetailScreenState extends State<DetailScreen> {
           shrinkWrap: true,
           padding: const EdgeInsets.fromLTRB(22, 0, 22, 24),
           children: [
-            Text(q.question,
-                style: Theme.of(context).textTheme.headlineSmall),
+            Text(title, style: Theme.of(context).textTheme.headlineSmall),
             const SizedBox(height: 10),
             ...people.map((p) => ListTile(
                   leading: const Icon(Icons.person_outline),
                   title: Text(p.name),
+                  subtitle: p.subtitle != null ? Text(p.subtitle!) : null,
                   onTap: () => Navigator.pop(context, p.id),
                 )),
             ListTile(
               leading: const Icon(Icons.person_add_alt),
-              title: const Text('New person…'),
+              title: const Text('New contact…'),
               onTap: () async {
-                final ctl = TextEditingController();
-                final name = await showDialog<String>(
-                  context: context,
-                  builder: (context) => AlertDialog(
-                    title: const Text('New person'),
-                    content: TextField(controller: ctl, autofocus: true),
-                    actions: [
-                      TextButton(
-                          onPressed: () => Navigator.pop(context),
-                          child: const Text('Cancel')),
-                      FilledButton(
-                          onPressed: () => Navigator.pop(context, ctl.text),
-                          child: const Text('Add')),
-                    ],
-                  ),
-                );
-                if (context.mounted) {
-                  Navigator.pop(context,
-                      (name != null && name.trim().isNotEmpty)
-                          ? db.upsertPerson(name)
-                          : null);
-                }
+                final id = await showPersonForm(context);
+                if (context.mounted) Navigator.pop(context, id);
               },
             ),
           ],
         ),
       ),
     );
+  }
+
+  /// FR-15: speaker question -> person picker -> enrollment.
+  Future<void> _answerSpeaker(Clarification q) async {
+    final personId = await _pickPerson(q.question);
     if (personId != null && q.speakerLabel != null) {
       VoiceIdService.instance
           .enrollSpeaker(db, widget.conversationId, q.speakerLabel!, personId);
       db.answerClarification(q.id, db.personName(personId));
+      setState(() {});
+    }
+  }
+
+  /// Assign an extracted fact/commitment/thread to a person (creates if new).
+  /// Tags them as 'mentioned' (not an attendee) so the fact shows on their
+  /// page without claiming they were in the room.
+  Future<void> _assignFact(Fact f) async {
+    final personId = await _pickPerson('Assign to…');
+    if (personId != null) {
+      db.linkFactPerson(f.id, personId);
+      db.tagPerson(widget.conversationId, personId, role: 'mentioned');
       setState(() {});
     }
   }
@@ -148,17 +147,29 @@ class _DetailScreenState extends State<DetailScreen> {
                 ?.copyWith(color: t.colorScheme.onSurfaceVariant),
           ),
           const SizedBox(height: 12),
+          if (d.people.isNotEmpty || d.mentioned.isNotEmpty)
+            Text('Attended',
+                style: t.textTheme.labelMedium
+                    ?.copyWith(color: t.colorScheme.onSurfaceVariant)),
+          const SizedBox(height: 6),
           Wrap(
             spacing: 6,
             runSpacing: 6,
             children: [
-              ...d.people.map((p) => Chip(
-                    label: Text(p.name),
-                    backgroundColor: t.colorScheme.surfaceContainerHighest,
-                    labelStyle: TextStyle(
-                        color: t.colorScheme.primary,
-                        fontWeight: FontWeight.w700),
-                    visualDensity: VisualDensity.compact,
+              ...d.people.map((p) => GestureDetector(
+                    onTap: () async {
+                      await Navigator.of(context).push(MaterialPageRoute(
+                          builder: (_) => PersonScreen(person: p)));
+                      setState(() {});
+                    },
+                    child: Chip(
+                      label: Text(p.label),
+                      backgroundColor: t.colorScheme.surfaceContainerHighest,
+                      labelStyle: TextStyle(
+                          color: t.colorScheme.primary,
+                          fontWeight: FontWeight.w700),
+                      visualDensity: VisualDensity.compact,
+                    ),
                   )),
               ActionChip(
                 label: const Text('Edit tags'),
@@ -173,6 +184,37 @@ class _DetailScreenState extends State<DetailScreen> {
               ),
             ],
           ),
+          if (d.mentioned.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Text('Mentioned',
+                style: t.textTheme.labelMedium
+                    ?.copyWith(color: t.colorScheme.onSurfaceVariant)),
+            const SizedBox(height: 6),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: d.mentioned
+                  .map((p) => GestureDetector(
+                        onTap: () async {
+                          await Navigator.of(context).push(MaterialPageRoute(
+                              builder: (_) => PersonScreen(person: p)));
+                          setState(() {});
+                        },
+                        child: Chip(
+                          avatar: const Icon(Icons.alternate_email, size: 14),
+                          label: Text(p.label),
+                          backgroundColor: t.colorScheme.surface,
+                          side: BorderSide(
+                              color: t.colorScheme.outlineVariant),
+                          labelStyle: TextStyle(
+                              color: t.colorScheme.onSurfaceVariant,
+                              fontWeight: FontWeight.w600),
+                          visualDensity: VisualDensity.compact,
+                        ),
+                      ))
+                  .toList(),
+            ),
+          ],
           const SizedBox(height: 18),
           if (busy)
             Card(
@@ -281,27 +323,41 @@ class _DetailScreenState extends State<DetailScreen> {
                         style: t.textTheme.titleSmall
                             ?.copyWith(fontWeight: FontWeight.w700)),
                     const SizedBox(height: 6),
-                    ...facts.map((f) => Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 4),
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text('· ',
-                                  style: TextStyle(
-                                      color: t.colorScheme.primary,
-                                      fontWeight: FontWeight.w800)),
-                              Expanded(
-                                child: Text(
-                                  (f.kind == 'commitment' ? '☐ ' : '') +
-                                      f.text +
-                                      ((f.resolvedName ?? f.personName) != null
-                                          ? ' — ${f.resolvedName ?? f.personName}'
-                                          : ''),
-                                  style: t.textTheme.bodyMedium
-                                      ?.copyWith(height: 1.4),
+                    ...facts.map((f) => InkWell(
+                          onTap: () => _assignFact(f),
+                          borderRadius: BorderRadius.circular(8),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 6),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text('· ',
+                                    style: TextStyle(
+                                        color: t.colorScheme.primary,
+                                        fontWeight: FontWeight.w800)),
+                                Expanded(
+                                  child: Text(
+                                    (f.kind == 'commitment' ? '☐ ' : '') +
+                                        f.text +
+                                        ((f.resolvedName ?? f.personName) != null
+                                            ? ' — ${f.resolvedName ?? f.personName}'
+                                            : ''),
+                                    style: t.textTheme.bodyMedium
+                                        ?.copyWith(height: 1.4),
+                                  ),
                                 ),
-                              ),
-                            ],
+                                const SizedBox(width: 6),
+                                Icon(
+                                  f.resolvedName != null
+                                      ? Icons.person
+                                      : Icons.person_add_alt,
+                                  size: 16,
+                                  color: f.resolvedName != null
+                                      ? t.colorScheme.secondary
+                                      : t.colorScheme.onSurfaceVariant,
+                                ),
+                              ],
+                            ),
                           ),
                         )),
                   ],

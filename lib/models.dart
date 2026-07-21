@@ -1,8 +1,34 @@
 class Person {
   final int id;
   final String name;
+  final String? company; // disambiguator: "Sonnetix", "Acme (prev)", "Friends"
+  final String? role;
+  final String? email;
+  final String? notes;
   final int convoCount;
-  const Person({required this.id, required this.name, this.convoCount = 0});
+  const Person({
+    required this.id,
+    required this.name,
+    this.company,
+    this.role,
+    this.email,
+    this.notes,
+    this.convoCount = 0,
+  });
+
+  /// "Ravi · Sonnetix" when a company is set — disambiguates same names.
+  String get label => (company != null && company!.trim().isNotEmpty)
+      ? '$name · ${company!.trim()}'
+      : name;
+
+  /// "Role · Company" for list subtitles, or null if neither set.
+  String? get subtitle {
+    final parts = [role, company]
+        .where((s) => s != null && s.trim().isNotEmpty)
+        .map((s) => s!.trim())
+        .toList();
+    return parts.isEmpty ? null : parts.join(' · ');
+  }
 }
 
 class ConversationSummary {
@@ -42,7 +68,8 @@ class ConversationDetail {
   final String title;
   final DateTime happenedAt;
   final int durationSec;
-  final List<Person> people;
+  final List<Person> people; // attendees
+  final List<Person> mentioned; // referenced only, not present
   final List<String> topics;
   final List<Artifact> artifacts;
   final String transcriptText; // concatenated transcripts
@@ -52,6 +79,7 @@ class ConversationDetail {
     required this.happenedAt,
     required this.durationSec,
     required this.people,
+    this.mentioned = const [],
     required this.topics,
     required this.artifacts,
     required this.transcriptText,

@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import '../main.dart';
 import '../models.dart';
 import 'detail_screen.dart';
+import 'person_form.dart';
 
 class PeopleScreen extends StatelessWidget {
   const PeopleScreen({super.key, required this.onChanged});
@@ -83,7 +84,8 @@ class PeopleScreen extends StatelessWidget {
                                       style: t.textTheme.titleMedium?.copyWith(
                                           fontWeight: FontWeight.w700)),
                                   Text(
-                                      '${p.convoCount} conversation${p.convoCount == 1 ? '' : 's'}',
+                                      p.subtitle ??
+                                          '${p.convoCount} conversation${p.convoCount == 1 ? '' : 's'}',
                                       style: t.textTheme.bodySmall?.copyWith(
                                           color: t.colorScheme.onSurfaceVariant)),
                                 ],
@@ -102,10 +104,15 @@ class PeopleScreen extends StatelessWidget {
 }
 
 /// FR-10 + FR-12: Brief · Facts · Conversations.
-class PersonScreen extends StatelessWidget {
+class PersonScreen extends StatefulWidget {
   const PersonScreen({super.key, required this.person});
   final Person person;
 
+  @override
+  State<PersonScreen> createState() => _PersonScreenState();
+}
+
+class _PersonScreenState extends State<PersonScreen> {
   static const _kindIcon = {
     'commitment': Icons.assignment_turned_in_outlined,
     'decision': Icons.gavel_outlined,
@@ -119,9 +126,16 @@ class PersonScreen extends StatelessWidget {
     'thread': 'Open thread',
   };
 
+  /// Edit the full contact card (name, company, role, email, notes).
+  Future<void> _edit() async {
+    await showPersonForm(context, existingId: widget.person.id);
+    if (mounted) setState(() {});
+  }
+
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context);
+    final person = db.getPerson(widget.person.id) ?? widget.person;
     final convos = db.personConversations(person.id);
     final facts = db.personFacts(person.id);
     final brief = db.brief(person.id);
@@ -132,6 +146,13 @@ class PersonScreen extends StatelessWidget {
         appBar: AppBar(
           title: Text(person.name, style: t.textTheme.headlineSmall),
           backgroundColor: Colors.transparent,
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.edit_outlined),
+              tooltip: 'Edit contact',
+              onPressed: _edit,
+            ),
+          ],
           bottom: const TabBar(tabs: [
             Tab(text: 'Brief'),
             Tab(text: 'Facts'),
@@ -143,6 +164,39 @@ class PersonScreen extends StatelessWidget {
           ListView(
             padding: const EdgeInsets.fromLTRB(22, 16, 22, 40),
             children: [
+              if (person.subtitle != null ||
+                  person.email != null ||
+                  person.notes != null) ...[
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(14),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (person.subtitle != null)
+                          Text(person.subtitle!,
+                              style: t.textTheme.titleSmall
+                                  ?.copyWith(fontWeight: FontWeight.w700)),
+                        if (person.email != null)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 4),
+                            child: Text(person.email!,
+                                style: t.textTheme.bodyMedium),
+                          ),
+                        if (person.notes != null)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 6),
+                            child: Text(person.notes!,
+                                style: t.textTheme.bodyMedium?.copyWith(
+                                    color: t.colorScheme.onSurfaceVariant,
+                                    height: 1.4)),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 10),
+              ],
               Card(
                 child: ListTile(
                   leading: const Icon(Icons.history),

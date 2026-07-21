@@ -105,6 +105,39 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ? 'Sample data loaded'
                 : 'Load sample data'),
           ),
+          const SizedBox(height: 18),
+          TextButton.icon(
+            onPressed: () async {
+              final ok = await showDialog<bool>(
+                context: context,
+                builder: (context) => AlertDialog(
+                  title: const Text('Reset local data?'),
+                  content: const Text(
+                      'Deletes all conversations, people and tags on this '
+                      'device. Your API key is kept. This cannot be undone.'),
+                  actions: [
+                    TextButton(
+                        onPressed: () => Navigator.pop(context, false),
+                        child: const Text('Cancel')),
+                    FilledButton(
+                        onPressed: () => Navigator.pop(context, true),
+                        child: const Text('Reset')),
+                  ],
+                ),
+              );
+              if (ok == true) {
+                db.resetLocalData();
+                setState(() => _sampleLoaded = false);
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                      content: Text('Local data cleared — reload the sample above')));
+                }
+              }
+            },
+            icon: Icon(Icons.delete_outline, color: t.colorScheme.error),
+            label: Text('Reset local data',
+                style: TextStyle(color: t.colorScheme.error)),
+          ),
         ],
       ),
     );
