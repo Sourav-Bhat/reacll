@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 
 import '../main.dart';
@@ -367,6 +368,24 @@ class _DetailScreenState extends State<DetailScreen> {
           }),
           if (d.transcriptText.isNotEmpty) ...[
             const SizedBox(height: 10),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text('Transcript',
+                    style: t.textTheme.labelMedium
+                        ?.copyWith(color: t.colorScheme.onSurfaceVariant)),
+                TextButton.icon(
+                  onPressed: () {
+                    Clipboard.setData(
+                        ClipboardData(text: d.transcriptText));
+                    ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Transcript copied')));
+                  },
+                  icon: const Icon(Icons.copy, size: 16),
+                  label: const Text('Copy'),
+                ),
+              ],
+            ),
             Container(
               padding: const EdgeInsets.only(left: 14),
               decoration: BoxDecoration(
@@ -376,7 +395,7 @@ class _DetailScreenState extends State<DetailScreen> {
                       width: 2.5),
                 ),
               ),
-              child: SelectableText(
+              child: Text(
                 d.transcriptText,
                 style: t.textTheme.bodyLarge?.copyWith(height: 1.65),
               ),
