@@ -13,6 +13,8 @@ dependencies:
   record: ^6.2.0                    # mic recording (wav 16k mono for whisper)
   # transcription (whisper.cpp via FFI, on-device, auto model download)
   whisper_ggml: ^1.7.0
+  # decode imported audio (m4a/mp3/…) -> 16 kHz mono WAV for whisper
+  ffmpeg_kit_flutter_new_min: ^2.1.0
   # Phase 3: on-device speaker diarization + voice identity (next-gen Kaldi)
   sherpa_onnx: ^1.13.2
   archive: ^3.6.1                   # unpack segmentation model tar.bz2

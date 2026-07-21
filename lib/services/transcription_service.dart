@@ -1,6 +1,11 @@
 import 'dart:async';
+import 'dart:io';
 
+import 'package:ffmpeg_kit_flutter_new_min/ffmpeg_kit.dart';
+import 'package:ffmpeg_kit_flutter_new_min/return_code.dart';
 import 'package:flutter/foundation.dart';
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 import 'package:whisper_ggml/whisper_ggml.dart';
 
 import '../db/database.dart';
@@ -33,6 +38,30 @@ class TranscriptionService extends ChangeNotifier {
     }
   }
 
+  /// Decode any audio file to 16 kHz mono 16-bit WAV (whisper-native) using
+  /// ffmpeg-kit. Paths are quoted so filenames with spaces (e.g. "ESG - Andy")
+  /// don't break the command. Returns the WAV path, or null on failure.
+  Future<String?> _toWav16k(String inputPath) async {
+    try {
+      final dir = await getTemporaryDirectory();
+      final out =
+          p.join(dir.path, 'tx_${DateTime.now().millisecondsSinceEpoch}.wav');
+      final session = await FFmpegKit.execute(
+          '-y -i "$inputPath" -ar 16000 -ac 1 -c:a pcm_s16le "$out"');
+      final rc = await session.getReturnCode();
+      if (ReturnCode.isSuccess(rc) && File(out).existsSync()) return out;
+      final log = (await session.getOutput()) ?? '';
+      final lines =
+          log.split('\n').where((l) => l.trim().isNotEmpty).toList();
+      lastError = 'Audio decode failed (ffmpeg): '
+          '${lines.isNotEmpty ? lines.last : 'return code $rc'}';
+      return null;
+    } catch (e) {
+      lastError = 'Audio decode error: $e';
+      return null;
+    }
+  }
+
   /// Drain the pending queue. Safe to call repeatedly (no-op if running).
   Future<void> pump(RecallDb db) async {
     if (_running) return;
@@ -47,9 +76,20 @@ class TranscriptionService extends ChangeNotifier {
         db.setArtifactStatus(a.id, 'transcribing');
         notifyListeners();
         try {
+          // whisper.cpp only reads 16 kHz mono WAV. Our own recordings already
+          // are; imported audio (m4a/mp3/…) must be decoded first.
+          var audioPath = a.filePath!;
+          if (a.kind != 'recording' ||
+              !audioPath.toLowerCase().endsWith('.wav')) {
+            final wav = await _toWav16k(audioPath);
+            if (wav == null) {
+              throw Exception(lastError ?? 'Could not decode audio to WAV');
+            }
+            audioPath = wav;
+          }
           final result = await _whisper.transcribe(
             model: model,
-            audioPath: a.filePath!,
+            audioPath: audioPath,
             lang: language,
           );
           final text = result?.transcription.text.trim() ?? '';

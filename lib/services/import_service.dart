@@ -92,8 +92,11 @@ class ImportService {
 
   Future<String> _copyIntoMedia(String src) async {
     final dir = await mediaDir();
-    final dest = p.join(dir.path,
-        '${DateTime.now().millisecondsSinceEpoch}_${p.basename(src)}');
+    // Sanitize the name: spaces/special chars in the path break whisper_ggml's
+    // internal ffmpeg conversion (unquoted command). Keep only safe chars.
+    final safe = p.basename(src).replaceAll(RegExp(r'[^A-Za-z0-9._-]'), '_');
+    final dest =
+        p.join(dir.path, '${DateTime.now().millisecondsSinceEpoch}_$safe');
     await File(src).copy(dest);
     return dest;
   }
