@@ -29,6 +29,7 @@ dependencies:
   cryptography: ^2.7.0              # PBKDF2 + AES-GCM for encrypted backup
   intl: ^0.19.0
   google_fonts: ^6.2.1              # Fraunces + Inter (2026 design)
+  package_info_plus: ^8.0.0        # show app version in Settings
 
 dev_dependencies:
   flutter_test:

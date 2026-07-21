@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'package:package_info_plus/package_info_plus.dart';
+
 import '../main.dart';
 import '../services/extraction_service.dart';
 import '../services/sample_data.dart';
@@ -14,6 +16,7 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   late final TextEditingController _keyCtl;
   bool _sampleLoaded = false;
+  String _version = '';
 
   @override
   void initState() {
@@ -21,6 +24,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _keyCtl = TextEditingController(
         text: db.getSetting(ExtractionService.settingApiKey) ?? '');
     _sampleLoaded = SampleData.isLoaded(db);
+    PackageInfo.fromPlatform().then((i) {
+      if (mounted) {
+        setState(() => _version = 'v${i.version}+${i.buildNumber}');
+      }
+    });
   }
 
   @override
@@ -137,6 +145,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
             icon: Icon(Icons.delete_outline, color: t.colorScheme.error),
             label: Text('Reset local data',
                 style: TextStyle(color: t.colorScheme.error)),
+          ),
+          const SizedBox(height: 28),
+          Center(
+            child: Text(
+              _version.isEmpty ? 'Recall' : 'Recall $_version',
+              style: t.textTheme.bodySmall
+                  ?.copyWith(color: t.colorScheme.onSurfaceVariant),
+            ),
           ),
         ],
       ),
