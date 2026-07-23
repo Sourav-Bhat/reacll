@@ -55,4 +55,18 @@ final Map<int, void Function(Database db)> migrations = {
       db.execute('ALTER TABLE conversations ADD COLUMN notes TEXT');
     }
   },
+
+  // v5 -> v6: AI summary + conversation type/bucket (additive, guarded).
+  6: (db) {
+    final cols = db
+        .select('PRAGMA table_info(conversations)')
+        .map((r) => r['name'] as String)
+        .toSet();
+    if (!cols.contains('summary')) {
+      db.execute('ALTER TABLE conversations ADD COLUMN summary TEXT');
+    }
+    if (!cols.contains('bucket')) {
+      db.execute('ALTER TABLE conversations ADD COLUMN bucket TEXT');
+    }
+  },
 };

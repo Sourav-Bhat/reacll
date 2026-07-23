@@ -15,6 +15,8 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   late final TextEditingController _keyCtl;
+  late final TextEditingController _geminiCtl;
+  String _provider = 'anthropic';
   bool _sampleLoaded = false;
   String _version = '';
 
@@ -23,6 +25,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     super.initState();
     _keyCtl = TextEditingController(
         text: db.getSetting(ExtractionService.settingApiKey) ?? '');
+    _geminiCtl = TextEditingController(
+        text: db.getSetting(ExtractionService.settingGeminiKey) ?? '');
+    _provider = db.getSetting(ExtractionService.settingProvider) ?? 'anthropic';
     _sampleLoaded = SampleData.isLoaded(db);
     PackageInfo.fromPlatform().then((i) {
       if (mounted) {
@@ -34,7 +39,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   void dispose() {
     _keyCtl.dispose();
+    _geminiCtl.dispose();
     super.dispose();
+  }
+
+  Widget _provTab(ThemeData t, String id, String label) {
+    final on = _provider == id;
+    return Expanded(
+      child: GestureDetector(
+        onTap: () => setState(() => _provider = id),
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          decoration: BoxDecoration(
+              color: on ? t.colorScheme.primary : Colors.transparent,
+              borderRadius: BorderRadius.circular(12)),
+          alignment: Alignment.center,
+          child: Text(label,
+              style: TextStyle(
+                  fontWeight: FontWeight.w600,
+                  fontSize: 13,
+                  color: on ? Colors.white : t.colorScheme.onSurfaceVariant)),
+        ),
+      ),
+    );
   }
 
   @override
@@ -47,24 +74,35 @@ class _SettingsScreenState extends State<SettingsScreen> {
       body: ListView(
         padding: const EdgeInsets.fromLTRB(22, 10, 22, 40),
         children: [
-          Text('Understanding (Phase 2)', style: t.textTheme.titleMedium
+          Text('AI provider', style: t.textTheme.titleMedium
               ?.copyWith(fontWeight: FontWeight.w700)),
           const SizedBox(height: 6),
           Text(
-            'Recall sends transcript TEXT (never audio) to the Claude API to '
-            'extract commitments, decisions and facts. Leave empty to keep '
-            'everything fully offline — recording, transcription and search '
-            'work without it.',
+            'Recall sends transcript TEXT (never audio) to extract a summary, '
+            'decisions, commitments and open threads. Leave the key empty to '
+            'stay fully offline — recording, transcription and search still work.',
             style: t.textTheme.bodyMedium
                 ?.copyWith(color: t.colorScheme.onSurfaceVariant, height: 1.5),
           ),
           const SizedBox(height: 14),
+          Container(
+            decoration: BoxDecoration(
+                border: Border.all(color: t.colorScheme.outlineVariant),
+                borderRadius: BorderRadius.circular(14)),
+            padding: const EdgeInsets.all(3),
+            child: Row(children: [
+              _provTab(t, 'anthropic', 'Anthropic (Claude)'),
+              _provTab(t, 'gemini', 'Gemini'),
+            ]),
+          ),
+          const SizedBox(height: 14),
           TextField(
-            controller: _keyCtl,
+            controller: _provider == 'gemini' ? _geminiCtl : _keyCtl,
             obscureText: true,
             decoration: InputDecoration(
-              labelText: 'Anthropic API key',
-              hintText: 'sk-ant-…',
+              labelText:
+                  _provider == 'gemini' ? 'Gemini API key' : 'Anthropic API key',
+              hintText: _provider == 'gemini' ? 'AIza…' : 'sk-ant-…',
               border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(18)),
             ),
@@ -72,8 +110,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const SizedBox(height: 16),
           FilledButton(
             onPressed: () {
+              db.setSetting(ExtractionService.settingProvider, _provider);
               db.setSetting(
                   ExtractionService.settingApiKey, _keyCtl.text.trim());
+              db.setSetting(
+                  ExtractionService.settingGeminiKey, _geminiCtl.text.trim());
               ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(content: Text('Saved')));
               // Anything skipped earlier can now be extracted.

@@ -3,7 +3,7 @@
 /// so keep it standard SQL (no Dart interpolation).
 library;
 
-const schemaVersion = 5;
+const schemaVersion = 6;
 
 const createSchema = '''
 PRAGMA foreign_keys = ON;
@@ -29,6 +29,8 @@ CREATE TABLE IF NOT EXISTS conversations (
   happened_at   TEXT NOT NULL DEFAULT (datetime('now')),
   duration_sec  INTEGER NOT NULL DEFAULT 0,
   notes         TEXT,
+  summary       TEXT,
+  bucket        TEXT,
   created_at    TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -298,7 +300,7 @@ LIMIT 50;
 
 /// Home list: conversations with people names aggregated, newest first.
 const homeListSql = '''
-SELECT c.id, c.title, c.happened_at, c.duration_sec,
+SELECT c.id, c.title, c.happened_at, c.duration_sec, c.bucket,
        (SELECT group_concat(p.name, ', ')
           FROM conversation_people cp JOIN people p ON p.id = cp.person_id
          WHERE cp.conversation_id = c.id AND cp.role = 'attendee') AS people_names,

@@ -11,6 +11,8 @@ import 'people_screen.dart';
 import 'person_form.dart';
 import 'tag_screen.dart';
 
+/// W13: a conversation opens to two tabs — Memory (structured breakdown) and
+/// Transcript.
 class DetailScreen extends StatefulWidget {
   const DetailScreen({super.key, required this.conversationId});
   final int conversationId;
@@ -23,7 +25,6 @@ class _DetailScreenState extends State<DetailScreen> {
   @override
   void initState() {
     super.initState();
-    // Refresh when transcription/extraction/diarization finishes.
     TranscriptionService.instance.addListener(_onTx);
     ExtractionService.instance.addListener(_onTx);
     VoiceIdService.instance.addListener(_onTx);
@@ -37,7 +38,12 @@ class _DetailScreenState extends State<DetailScreen> {
     super.dispose();
   }
 
-  /// Shared person picker: existing people + inline "new person". Returns id.
+  void _onTx() {
+    if (mounted) setState(() {});
+  }
+
+  // ---------------- person picker + actions ----------------
+
   Future<int?> _pickPerson(String title) {
     final people = db.peopleList();
     return showModalBottomSheet<int>(
@@ -70,7 +76,6 @@ class _DetailScreenState extends State<DetailScreen> {
     );
   }
 
-  /// FR-15: speaker question -> person picker -> enrollment.
   Future<void> _answerSpeaker(Clarification q) async {
     final personId = await _pickPerson(q.question);
     if (personId != null && q.speakerLabel != null) {
@@ -81,9 +86,6 @@ class _DetailScreenState extends State<DetailScreen> {
     }
   }
 
-  /// Assign an extracted fact/commitment/thread to a person (creates if new).
-  /// Tags them as 'mentioned' (not an attendee) so the fact shows on their
-  /// page without claiming they were in the room.
   Future<void> _assignFact(Fact f) async {
     final personId = await _pickPerson('Assign to…');
     if (personId != null) {
@@ -103,8 +105,7 @@ class _DetailScreenState extends State<DetailScreen> {
             controller: ctl,
             autofocus: true,
             maxLines: 3,
-            decoration:
-                const InputDecoration(hintText: 'Type your answer…')),
+            decoration: const InputDecoration(hintText: 'Type your answer…')),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context),
@@ -122,11 +123,6 @@ class _DetailScreenState extends State<DetailScreen> {
     }
   }
 
-  void _onTx() {
-    if (mounted) setState(() {});
-  }
-
-  /// W12: delete the whole conversation.
   Future<void> _deleteConversation() async {
     final t = Theme.of(context);
     final ok = await showDialog<bool>(
@@ -153,7 +149,6 @@ class _DetailScreenState extends State<DetailScreen> {
     }
   }
 
-  /// W4: edit personal notes.
   Future<void> _editNotes(String? current) async {
     final ctl = TextEditingController(text: current ?? '');
     final saved = await showDialog<String>(
@@ -183,209 +178,348 @@ class _DetailScreenState extends State<DetailScreen> {
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final t = Theme.of(context);
-    final d = db.detail(widget.conversationId);
-    final busy = d.artifacts.any((a) =>
-        a.status == 'pending' || a.status == 'transcribing');
-    final failed = d.artifacts.where((a) => a.status == 'failed').toList();
+  // ---------------- small building blocks ----------------
 
-    return Scaffold(
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.delete_outline),
-            tooltip: 'Delete conversation',
-            onPressed: _deleteConversation,
+  Widget _sectionHeader(ThemeData t, String label, Color color) => Padding(
+        padding: const EdgeInsets.only(top: 22, bottom: 8),
+        child: Row(children: [
+          Container(
+              width: 8,
+              height: 8,
+              decoration:
+                  BoxDecoration(color: color, borderRadius: BorderRadius.circular(3))),
+          const SizedBox(width: 8),
+          Text(label.toUpperCase(),
+              style: t.textTheme.labelMedium?.copyWith(
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: .5,
+                  color: t.colorScheme.onSurfaceVariant)),
+        ]),
+      );
+
+  Widget _factRow(ThemeData t, Fact f) {
+    final who = f.resolvedName ?? f.personName;
+    return InkWell(
+      onTap: () => _assignFact(f),
+      borderRadius: BorderRadius.circular(14),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.all(13),
+        decoration: BoxDecoration(
+            color: t.colorScheme.surface,
+            border: Border.all(color: t.colorScheme.outlineVariant),
+            borderRadius: BorderRadius.circular(14)),
+        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text((f.kind == 'commitment' ? '☐  ' : '') + f.text,
+                  style: t.textTheme.bodyMedium?.copyWith(height: 1.45)),
+              if (who != null || f.dueHint != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Wrap(spacing: 8, runSpacing: 4, children: [
+                    if (who != null)
+                      Text('— $who',
+                          style: t.textTheme.labelMedium?.copyWith(
+                              color: t.colorScheme.primary,
+                              fontWeight: FontWeight.w700)),
+                    if (f.dueHint != null)
+                      Container(
+                          padding:
+                              const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                              color: const Color(0xFFF5EBD6),
+                              borderRadius: BorderRadius.circular(10)),
+                          child: Text('due ${f.dueHint}',
+                              style: const TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                  color: Color(0xFFB98A2F)))),
+                  ]),
+                ),
+            ]),
           ),
-        ],
+          const SizedBox(width: 6),
+          Icon(f.resolvedName != null ? Icons.person : Icons.person_add_alt,
+              size: 16,
+              color: f.resolvedName != null
+                  ? t.colorScheme.secondary
+                  : t.colorScheme.onSurfaceVariant),
+        ]),
       ),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(22, 0, 22, 40),
-        children: [
-          Text(d.title, style: t.textTheme.headlineMedium),
-          const SizedBox(height: 4),
-          Text(
-            '${DateFormat('EEEE d MMM y · HH:mm').format(d.happenedAt)}'
-            '${d.durationSec > 0 ? ' · ${(d.durationSec / 60).round()} min' : ''}',
-            style: t.textTheme.bodyMedium
-                ?.copyWith(color: t.colorScheme.onSurfaceVariant),
+    );
+  }
+
+  // ---------------- tabs ----------------
+
+  Widget _transcriptTab(
+      ThemeData t, ConversationDetail d, bool busy, List<Artifact> failed) {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(22, 16, 22, 40),
+      children: [
+        if (busy)
+          Card(
+            child: ListTile(
+              leading: const SizedBox(
+                  width: 22,
+                  height: 22,
+                  child: CircularProgressIndicator(strokeWidth: 2.5)),
+              title: const Text('Transcribing on your phone…'),
+              subtitle: const Text('Your audio never leaves the device.'),
+            ),
           ),
-          const SizedBox(height: 12),
-          if (d.people.isNotEmpty || d.mentioned.isNotEmpty)
-            Text('Attended',
-                style: t.textTheme.labelMedium
+        ...failed.map((a) => Card(
+              child: ListTile(
+                isThreeLine: TranscriptionService.instance.lastError != null,
+                leading: Icon(Icons.error_outline, color: t.colorScheme.error),
+                title: const Text('Transcription failed'),
+                subtitle: TranscriptionService.instance.lastError != null
+                    ? Text(TranscriptionService.instance.lastError!,
+                        style: t.textTheme.bodySmall)
+                    : null,
+                trailing: SizedBox(
+                  width: 85,
+                  child: FilledButton.tonal(
+                    onPressed: () async {
+                      await TranscriptionService.instance.retry(db, a.id);
+                      if (mounted) setState(() {});
+                    },
+                    child: const Text('Retry'),
+                  ),
+                ),
+              ),
+            )),
+        if (d.transcriptText.isNotEmpty) ...[
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text('Full transcript',
+                  style: t.textTheme.labelMedium
+                      ?.copyWith(color: t.colorScheme.onSurfaceVariant)),
+              TextButton.icon(
+                onPressed: () {
+                  Clipboard.setData(ClipboardData(text: d.transcriptText));
+                  ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Transcript copied')));
+                },
+                icon: const Icon(Icons.copy, size: 16),
+                label: const Text('Copy'),
+              ),
+            ],
+          ),
+          Container(
+            padding: const EdgeInsets.only(left: 14),
+            decoration: BoxDecoration(
+              border: Border(
+                left: BorderSide(
+                    color: t.colorScheme.primary.withValues(alpha: .35),
+                    width: 2.5),
+              ),
+            ),
+            child: Text(d.transcriptText,
+                style: t.textTheme.bodyLarge?.copyWith(height: 1.65)),
+          ),
+        ] else if (!busy && failed.isEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 30),
+            child: Text('No transcript yet.',
+                textAlign: TextAlign.center,
+                style: t.textTheme.bodyLarge
                     ?.copyWith(color: t.colorScheme.onSurfaceVariant)),
+          ),
+      ],
+    );
+  }
+
+  Widget _memoryTab(
+      ThemeData t, ConversationDetail d, bool busy, List<Artifact> failed) {
+    final facts = db.conversationFacts(d.id);
+    List<Fact> byKind(String k) => facts.where((f) => f.kind == k).toList();
+    final decisions = byKind('decision');
+    final commitments = byKind('commitment');
+    final threads = byKind('thread');
+    final keyfacts = byKind('fact');
+    final clars = db.openClarifications(d.id);
+    final speakers = db.conversationSpeakers(d.id);
+    final extractStatus = db.extractionStatus(d.id);
+    final hasMemory =
+        d.summary != null || facts.isNotEmpty || clars.isNotEmpty;
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(22, 14, 22, 40),
+      children: [
+        // meta + bucket + tags
+        Text(
+          '${DateFormat('EEE d MMM y · HH:mm').format(d.happenedAt)}'
+          '${d.durationSec > 0 ? ' · ${(d.durationSec / 60).round()} min' : ''}',
+          style: t.textTheme.bodyMedium
+              ?.copyWith(color: t.colorScheme.onSurfaceVariant),
+        ),
+        const SizedBox(height: 10),
+        Wrap(spacing: 6, runSpacing: 6, children: [
+          if (d.bucket != null)
+            Chip(
+              label: Text(d.bucket!),
+              backgroundColor: const Color(0xFFF5EBD6),
+              labelStyle: const TextStyle(
+                  color: Color(0xFFB98A2F), fontWeight: FontWeight.w700),
+              visualDensity: VisualDensity.compact,
+            ),
+          ...d.topics.map((tp) => Chip(
+                label: Text('#$tp'),
+                backgroundColor: Colors.transparent,
+                side: BorderSide(color: t.colorScheme.outlineVariant),
+                labelStyle: TextStyle(color: t.colorScheme.onSurfaceVariant),
+                visualDensity: VisualDensity.compact,
+              )),
+        ]),
+
+        // participants
+        const SizedBox(height: 8),
+        if (d.people.isNotEmpty || d.mentioned.isNotEmpty)
+          Text('Attended',
+              style: t.textTheme.labelMedium
+                  ?.copyWith(color: t.colorScheme.onSurfaceVariant)),
+        const SizedBox(height: 6),
+        Wrap(spacing: 6, runSpacing: 6, children: [
+          ...d.people.map((p) => GestureDetector(
+                onTap: () async {
+                  await Navigator.of(context).push(MaterialPageRoute(
+                      builder: (_) => PersonScreen(person: p)));
+                  setState(() {});
+                },
+                child: Chip(
+                  label: Text(p.label),
+                  backgroundColor: t.colorScheme.surfaceContainerHighest,
+                  labelStyle: TextStyle(
+                      color: t.colorScheme.primary, fontWeight: FontWeight.w700),
+                  visualDensity: VisualDensity.compact,
+                ),
+              )),
+          ActionChip(
+            label: const Text('Edit tags'),
+            avatar: const Icon(Icons.edit, size: 16),
+            onPressed: () async {
+              await Navigator.of(context).push(MaterialPageRoute(
+                  builder: (_) => TagScreen(conversationId: d.id)));
+              setState(() {});
+            },
+            visualDensity: VisualDensity.compact,
+          ),
+        ]),
+        if (d.mentioned.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          Text('Mentioned',
+              style: t.textTheme.labelMedium
+                  ?.copyWith(color: t.colorScheme.onSurfaceVariant)),
           const SizedBox(height: 6),
           Wrap(
             spacing: 6,
             runSpacing: 6,
-            children: [
-              ...d.people.map((p) => GestureDetector(
-                    onTap: () async {
-                      await Navigator.of(context).push(MaterialPageRoute(
-                          builder: (_) => PersonScreen(person: p)));
-                      setState(() {});
-                    },
-                    child: Chip(
-                      label: Text(p.label),
-                      backgroundColor: t.colorScheme.surfaceContainerHighest,
-                      labelStyle: TextStyle(
-                          color: t.colorScheme.primary,
-                          fontWeight: FontWeight.w700),
-                      visualDensity: VisualDensity.compact,
-                    ),
-                  )),
-              ActionChip(
-                label: const Text('Edit tags'),
-                avatar: const Icon(Icons.edit, size: 16),
-                onPressed: () async {
-                  await Navigator.of(context).push(MaterialPageRoute(
-                      builder: (_) =>
-                          TagScreen(conversationId: d.id)));
-                  setState(() {});
-                },
-                visualDensity: VisualDensity.compact,
-              ),
-            ],
-          ),
-          if (d.mentioned.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            Text('Mentioned',
-                style: t.textTheme.labelMedium
-                    ?.copyWith(color: t.colorScheme.onSurfaceVariant)),
-            const SizedBox(height: 6),
-            Wrap(
-              spacing: 6,
-              runSpacing: 6,
-              children: d.mentioned
-                  .map((p) => GestureDetector(
-                        onTap: () async {
-                          await Navigator.of(context).push(MaterialPageRoute(
-                              builder: (_) => PersonScreen(person: p)));
-                          setState(() {});
-                        },
-                        child: Chip(
-                          avatar: const Icon(Icons.alternate_email, size: 14),
-                          label: Text(p.label),
-                          backgroundColor: t.colorScheme.surface,
-                          side: BorderSide(
-                              color: t.colorScheme.outlineVariant),
-                          labelStyle: TextStyle(
-                              color: t.colorScheme.onSurfaceVariant,
-                              fontWeight: FontWeight.w600),
-                          visualDensity: VisualDensity.compact,
-                        ),
-                      ))
-                  .toList(),
-            ),
-          ],
-          const SizedBox(height: 14),
-          // W4: personal notes
-          InkWell(
-            onTap: () => _editNotes(d.notes),
-            borderRadius: BorderRadius.circular(16),
-            child: Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: t.colorScheme.surfaceContainerHighest,
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Icon(Icons.sticky_note_2_outlined,
-                      size: 18, color: t.colorScheme.primary),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      (d.notes == null || d.notes!.isEmpty)
-                          ? 'Add your notes…'
-                          : d.notes!,
-                      style: t.textTheme.bodyMedium?.copyWith(
-                          height: 1.4,
-                          color: (d.notes == null || d.notes!.isEmpty)
-                              ? t.colorScheme.onSurfaceVariant
-                              : t.colorScheme.onSurface),
-                    ),
-                  ),
-                  Icon(Icons.edit, size: 15, color: t.colorScheme.onSurfaceVariant),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 18),
-          if (busy)
-            Card(
-              child: ListTile(
-                leading: const SizedBox(
-                    width: 22, height: 22,
-                    child: CircularProgressIndicator(strokeWidth: 2.5)),
-                title: const Text('Transcribing on your phone…'),
-                subtitle: const Text('Your audio never leaves the device.'),
-              ),
-            ),
-          ...failed.map((a) => Card(
-                child: ListTile(
-                  isThreeLine:
-                      TranscriptionService.instance.lastError != null,
-                  leading:
-                      Icon(Icons.error_outline, color: t.colorScheme.error),
-                  title: const Text('Transcription failed'),
-                  subtitle: TranscriptionService.instance.lastError != null
-                      ? Text(TranscriptionService.instance.lastError!,
-                          style: t.textTheme.bodySmall)
-                      : null,
-                  trailing: SizedBox(
-                    width: 85,
-                    child: FilledButton.tonal(
-                      onPressed: () async {
-                        await TranscriptionService.instance.retry(db, a.id);
-                        if (mounted) setState(() {});
+            children: d.mentioned
+                .map((p) => GestureDetector(
+                      onTap: () async {
+                        await Navigator.of(context).push(MaterialPageRoute(
+                            builder: (_) => PersonScreen(person: p)));
+                        setState(() {});
                       },
-                      child: const Text('Retry'),
-                    ),
-                  ),
-                ),
-              )),
-          // ---- Phase 3: who spoke (FR-14/FR-16) ----
-          Builder(builder: (context) {
-            final speakers = db.conversationSpeakers(d.id);
-            if (speakers.isEmpty) return const SizedBox.shrink();
-            return Padding(
-              padding: const EdgeInsets.only(bottom: 10),
-              child: Wrap(
-                spacing: 6,
-                runSpacing: 6,
-                children: speakers.map((s) {
-                  final mins = (s.talkMs / 60000).round();
-                  final label = s.name ?? 'Speaker ${s.label + 1}';
-                  final known = s.name != null;
-                  return Chip(
-                    avatar: Icon(
-                        known ? Icons.verified_user_outlined : Icons.help_outline,
-                        size: 16,
-                        color: known
-                            ? t.colorScheme.secondary
-                            : t.colorScheme.onSurfaceVariant),
-                    label: Text('$label · ${mins}m'),
-                    backgroundColor: known
-                        ? const Color(0xFFE4EBE0)
-                        : t.colorScheme.surfaceContainerHighest,
-                    labelStyle: t.textTheme.labelMedium
-                        ?.copyWith(fontWeight: FontWeight.w700),
-                    visualDensity: VisualDensity.compact,
-                  );
-                }).toList(),
-              ),
-            );
-          }),
-          // ---- Phase 2: clarification questions (FR-11, max 3, dismissible) ----
-          ...db.openClarifications(d.id).map((q) => Card(
+                      child: Chip(
+                        avatar: const Icon(Icons.alternate_email, size: 14),
+                        label: Text(p.label),
+                        backgroundColor: t.colorScheme.surface,
+                        side: BorderSide(color: t.colorScheme.outlineVariant),
+                        labelStyle: TextStyle(
+                            color: t.colorScheme.onSurfaceVariant,
+                            fontWeight: FontWeight.w600),
+                        visualDensity: VisualDensity.compact,
+                      ),
+                    ))
+                .toList(),
+          ),
+        ],
+
+        // notes
+        const SizedBox(height: 14),
+        InkWell(
+          onTap: () => _editNotes(d.notes),
+          borderRadius: BorderRadius.circular(16),
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
                 color: t.colorScheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(16)),
+            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Icon(Icons.sticky_note_2_outlined,
+                  size: 18, color: t.colorScheme.primary),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  (d.notes == null || d.notes!.isEmpty)
+                      ? 'Add your notes…'
+                      : d.notes!,
+                  style: t.textTheme.bodyMedium?.copyWith(
+                      height: 1.4,
+                      color: (d.notes == null || d.notes!.isEmpty)
+                          ? t.colorScheme.onSurfaceVariant
+                          : t.colorScheme.onSurface),
+                ),
+              ),
+              Icon(Icons.edit, size: 15, color: t.colorScheme.onSurfaceVariant),
+            ]),
+          ),
+        ),
+
+        // transcription status
+        if (busy) ...[
+          const SizedBox(height: 12),
+          Card(
+            child: ListTile(
+              leading: const SizedBox(
+                  width: 22,
+                  height: 22,
+                  child: CircularProgressIndicator(strokeWidth: 2.5)),
+              title: const Text('Transcribing on your phone…'),
+              subtitle: const Text('Memory appears once the transcript is ready.'),
+            ),
+          ),
+        ],
+
+        // speakers
+        if (speakers.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: speakers.map((s) {
+              final mins = (s.talkMs / 60000).round();
+              final label = s.name ?? 'Speaker ${s.label + 1}';
+              final known = s.name != null;
+              return Chip(
+                avatar: Icon(
+                    known ? Icons.verified_user_outlined : Icons.help_outline,
+                    size: 16,
+                    color: known
+                        ? t.colorScheme.secondary
+                        : t.colorScheme.onSurfaceVariant),
+                label: Text('$label · ${mins}m'),
+                backgroundColor: known
+                    ? const Color(0xFFE4EBE0)
+                    : t.colorScheme.surfaceContainerHighest,
+                labelStyle:
+                    t.textTheme.labelMedium?.copyWith(fontWeight: FontWeight.w700),
+                visualDensity: VisualDensity.compact,
+              );
+            }).toList(),
+          ),
+        ],
+
+        // clarifications
+        if (clars.isNotEmpty) ...[
+          _sectionHeader(t, 'Clarifications needed · ${clars.length}',
+              const Color(0xFF4E6B4A)),
+          ...clars.map((q) => Card(
+                color: const Color(0xFFE6EDE2),
                 child: Padding(
                   padding: const EdgeInsets.fromLTRB(16, 12, 8, 8),
                   child: Column(
@@ -420,105 +554,98 @@ class _DetailScreenState extends State<DetailScreen> {
                   ),
                 ),
               )),
-          // ---- Phase 2: extracted facts for this conversation (FR-9) ----
-          Builder(builder: (context) {
-            final facts = db.conversationFacts(d.id);
-            if (facts.isEmpty) return const SizedBox.shrink();
-            return Card(
-              child: Padding(
-                padding: const EdgeInsets.all(14),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Extracted',
-                        style: t.textTheme.titleSmall
-                            ?.copyWith(fontWeight: FontWeight.w700)),
-                    const SizedBox(height: 6),
-                    ...facts.map((f) => InkWell(
-                          onTap: () => _assignFact(f),
-                          borderRadius: BorderRadius.circular(8),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 6),
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text('· ',
-                                    style: TextStyle(
-                                        color: t.colorScheme.primary,
-                                        fontWeight: FontWeight.w800)),
-                                Expanded(
-                                  child: Text(
-                                    (f.kind == 'commitment' ? '☐ ' : '') +
-                                        f.text +
-                                        ((f.resolvedName ?? f.personName) != null
-                                            ? ' — ${f.resolvedName ?? f.personName}'
-                                            : ''),
-                                    style: t.textTheme.bodyMedium
-                                        ?.copyWith(height: 1.4),
-                                  ),
-                                ),
-                                const SizedBox(width: 6),
-                                Icon(
-                                  f.resolvedName != null
-                                      ? Icons.person
-                                      : Icons.person_add_alt,
-                                  size: 16,
-                                  color: f.resolvedName != null
-                                      ? t.colorScheme.secondary
-                                      : t.colorScheme.onSurfaceVariant,
-                                ),
-                              ],
-                            ),
-                          ),
-                        )),
-                  ],
-                ),
-              ),
-            );
-          }),
-          if (d.transcriptText.isNotEmpty) ...[
-            const SizedBox(height: 10),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text('Transcript',
-                    style: t.textTheme.labelMedium
-                        ?.copyWith(color: t.colorScheme.onSurfaceVariant)),
-                TextButton.icon(
-                  onPressed: () {
-                    Clipboard.setData(
-                        ClipboardData(text: d.transcriptText));
-                    ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Transcript copied')));
-                  },
-                  icon: const Icon(Icons.copy, size: 16),
-                  label: const Text('Copy'),
-                ),
-              ],
-            ),
-            Container(
-              padding: const EdgeInsets.only(left: 14),
-              decoration: BoxDecoration(
-                border: Border(
-                  left: BorderSide(
-                      color: t.colorScheme.primary.withValues(alpha: .35),
-                      width: 2.5),
-                ),
-              ),
-              child: Text(
-                d.transcriptText,
-                style: t.textTheme.bodyLarge?.copyWith(height: 1.65),
-              ),
-            ),
-          ] else if (!busy && failed.isEmpty)
-            Padding(
-              padding: const EdgeInsets.only(top: 30),
-              child: Text('No transcript yet.',
-                  textAlign: TextAlign.center,
-                  style: t.textTheme.bodyLarge
-                      ?.copyWith(color: t.colorScheme.onSurfaceVariant)),
-            ),
         ],
+
+        // summary
+        if (d.summary != null) ...[
+          _sectionHeader(t, 'Summary', const Color(0xFF1D1C18)),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: t.colorScheme.surface,
+              border: Border(
+                  left: BorderSide(color: t.colorScheme.primary, width: 3)),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Text(d.summary!,
+                style: t.textTheme.bodyMedium?.copyWith(height: 1.6)),
+          ),
+        ],
+
+        // decisions / commitments / threads / facts
+        if (decisions.isNotEmpty) ...[
+          _sectionHeader(t, 'Decisions · ${decisions.length}',
+              const Color(0xFF5C6E8C)),
+          ...decisions.map((f) => _factRow(t, f)),
+        ],
+        if (commitments.isNotEmpty) ...[
+          _sectionHeader(t, 'Commitments & actions · ${commitments.length}',
+              const Color(0xFFB98A2F)),
+          ...commitments.map((f) => _factRow(t, f)),
+        ],
+        if (threads.isNotEmpty) ...[
+          _sectionHeader(
+              t, 'Open threads · ${threads.length}', const Color(0xFFB4472F)),
+          ...threads.map((f) => _factRow(t, f)),
+        ],
+        if (keyfacts.isNotEmpty) ...[
+          _sectionHeader(t, 'Key facts', const Color(0xFF8B857A)),
+          ...keyfacts.map((f) => _factRow(t, f)),
+        ],
+
+        // empty / offline hint
+        if (!hasMemory && !busy && d.transcriptText.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 24),
+            child: Text(
+              extractStatus == 'running'
+                  ? 'Extracting memory…'
+                  : (extractStatus == 'skipped' || extractStatus == null)
+                      ? 'No memory yet. Add an AI key in Settings to extract '
+                          'the summary, decisions, commitments and open threads.'
+                      : extractStatus == 'failed'
+                          ? 'Extraction failed — check your AI key in Settings.'
+                          : 'No memory extracted for this conversation.',
+              textAlign: TextAlign.center,
+              style: t.textTheme.bodyMedium?.copyWith(
+                  color: t.colorScheme.onSurfaceVariant, height: 1.5),
+            ),
+          ),
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context);
+    final d = db.detail(widget.conversationId);
+    final busy = d.artifacts
+        .any((a) => a.status == 'pending' || a.status == 'transcribing');
+    final failed = d.artifacts.where((a) => a.status == 'failed').toList();
+
+    return DefaultTabController(
+      length: 2,
+      child: Scaffold(
+        appBar: AppBar(
+          backgroundColor: Colors.transparent,
+          title: Text(d.title,
+              style: t.textTheme.titleLarge, overflow: TextOverflow.ellipsis),
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.delete_outline),
+              tooltip: 'Delete conversation',
+              onPressed: _deleteConversation,
+            ),
+          ],
+          bottom: const TabBar(
+            tabs: [Tab(text: 'Memory'), Tab(text: 'Transcript')],
+          ),
+        ),
+        body: TabBarView(children: [
+          _memoryTab(t, d, busy, failed),
+          _transcriptTab(t, d, busy, failed),
+        ]),
       ),
     );
   }

@@ -38,6 +38,7 @@ class ConversationSummary {
   final int durationSec;
   final String peopleNames; // "Priya, Ravi" or ''
   final bool busy; // still transcribing
+  final String? bucket; // conversation type, e.g. "1:1", "Standup"
   const ConversationSummary({
     required this.id,
     required this.title,
@@ -45,6 +46,7 @@ class ConversationSummary {
     required this.durationSec,
     required this.peopleNames,
     required this.busy,
+    this.bucket,
   });
 }
 
@@ -69,6 +71,8 @@ class ConversationDetail {
   final DateTime happenedAt;
   final int durationSec;
   final String? notes; // W4: personal notes
+  final String? summary; // W7: AI summary
+  final String? bucket; // W13: conversation type
   final List<Person> people; // attendees
   final List<Person> mentioned; // referenced only, not present
   final List<String> topics;
@@ -80,6 +84,8 @@ class ConversationDetail {
     required this.happenedAt,
     required this.durationSec,
     this.notes,
+    this.summary,
+    this.bucket,
     required this.people,
     this.mentioned = const [],
     required this.topics,

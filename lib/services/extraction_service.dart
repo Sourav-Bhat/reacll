@@ -6,23 +6,35 @@ import 'package:http/http.dart' as http;
 
 import '../db/database.dart';
 
-/// FR-9 + FR-11: structured extraction via Claude API (TEXT ONLY — audio never
-/// leaves the device), plus confidence-triggered clarification questions.
+/// FR-9 + FR-11 + W6/W7/W8/W13: structured extraction (TEXT ONLY — audio never
+/// leaves the device). Produces a summary, a conversation type/bucket, typed
+/// facts (commitments/decisions/facts/threads) and clarification questions,
+/// via Anthropic (Claude) or Google (Gemini) — user's choice.
 ///
-/// Contract with the model (strict JSON):
+/// Model JSON contract (strict):
 /// {
-///   "facts": [{"kind":"commitment|decision|fact|thread", "text":"...",
-///              "person":"name or null", "due":"free text or null",
+///   "summary": "2-4 sentence recap",
+///   "bucket": "1:1 | Standup | Planning | Brainstorm | Decision/Review |
+///              Kickoff | Retro | Interview | Vendor/Sales | User-research |
+///              Status update | Deep-dive | Personal | Other",
+///   "facts": [{"kind":"commitment|decision|fact|thread","text":"...",
+///              "person":"name or null","due":"free text or null",
 ///              "confidence":0.0-1.0}],
-///   "questions": [{"question":"...", "reason":"..."}]   // max 3
+///   "questions": [{"question":"...","reason":"..."}]   // max 3
 /// }
 class ExtractionService extends ChangeNotifier {
   ExtractionService._();
   static final ExtractionService instance = ExtractionService._();
 
+  // Settings keys.
+  static const settingProvider = 'ai_provider'; // 'anthropic' | 'gemini'
   static const settingApiKey = 'anthropic_api_key';
-  static const _endpoint = 'https://api.anthropic.com/v1/messages';
-  static const _model = 'claude-haiku-4-5';
+  static const settingGeminiKey = 'gemini_api_key';
+
+  static const _anthropicEndpoint = 'https://api.anthropic.com/v1/messages';
+  static const _anthropicModel = 'claude-haiku-4-5';
+  static const _geminiModel = 'gemini-2.0-flash';
+
   static const maxQuestions = 3;
   static const linkConfidence = 0.75; // below this, don't auto-file to a person
 
@@ -31,33 +43,43 @@ class ExtractionService extends ChangeNotifier {
 
   static const _systemPrompt = '''
 You extract structured memory from a conversation transcript for a personal
-recall app. Reply with ONLY a JSON object, no prose, matching:
-{"facts":[{"kind":"commitment|decision|fact|thread","text":str,
+recall app, so the user never has to re-read the transcript. Reply with ONLY a
+JSON object, no prose, matching:
+{"summary":str,"bucket":str,
+"facts":[{"kind":"commitment|decision|fact|thread","text":str,
 "person":str|null,"due":str|null,"confidence":num 0..1}],
 "questions":[{"question":str,"reason":str}]}
 
 Rules:
-- commitment: someone agreed to do something. person = who owes it.
+- summary: 2-4 sentences capturing what the conversation was about and its outcome.
+- bucket: the single best conversation TYPE from exactly this list: "1:1",
+  "Standup", "Planning", "Brainstorm", "Decision/Review", "Kickoff", "Retro",
+  "Interview", "Vendor/Sales", "User-research", "Status update", "Deep-dive",
+  "Personal", "Other".
+- commitment: someone agreed to do something. person = who owes it; due = when.
 - decision: something was decided. fact: a durable fact about a person/topic.
 - thread: an open question or unresolved topic to follow up.
 - Extract only what is genuinely useful for recall; quality over quantity.
-- Use the speaker's name only if it appears in the transcript; otherwise null.
+- Use a name only if it appears in the transcript; otherwise null.
 - questions: at MOST 3, ONLY where ambiguity blocks filing something important
-  (unknown person for a commitment, missing deadline, unclear referent).
+  (unknown person for a commitment, missing owner/deadline, unclear referent).
   If nothing important is ambiguous, return an empty questions list.
 ''';
 
-  /// Drain all pending extractions. No-op without an API key (status 'skipped').
+  /// Drain all pending extractions. No-op without a key (status 'skipped').
   Future<void> pump(RecallDb db) async {
     if (_running) return;
-    final apiKey = db.getSetting(settingApiKey);
+    final provider = db.getSetting(settingProvider) ?? 'anthropic';
+    final apiKey = provider == 'gemini'
+        ? db.getSetting(settingGeminiKey)
+        : db.getSetting(settingApiKey);
     _running = true;
     notifyListeners();
     try {
       for (final convId in db.pendingExtractions()) {
         if (apiKey == null || apiKey.isEmpty) {
           db.setExtractionStatus(convId, 'skipped',
-              error: 'No API key configured');
+              error: 'No ${provider == 'gemini' ? 'Gemini' : 'Anthropic'} API key');
           continue;
         }
         db.setExtractionStatus(convId, 'running');
@@ -68,7 +90,9 @@ Rules:
             db.setExtractionStatus(convId, 'skipped', error: 'No transcript');
             continue;
           }
-          final json = await _callClaude(apiKey, detail.transcriptText);
+          final json = provider == 'gemini'
+              ? await _callGemini(apiKey, detail.transcriptText)
+              : await _callClaude(apiKey, detail.transcriptText);
           _store(db, convId, json);
           db.setExtractionStatus(convId, 'done');
         } catch (e) {
@@ -85,14 +109,14 @@ Rules:
   Future<Map<String, dynamic>> _callClaude(String apiKey, String transcript) async {
     final resp = await http
         .post(
-          Uri.parse(_endpoint),
+          Uri.parse(_anthropicEndpoint),
           headers: {
             'x-api-key': apiKey,
             'anthropic-version': '2023-06-01',
             'content-type': 'application/json',
           },
           body: jsonEncode({
-            'model': _model,
+            'model': _anthropicModel,
             'max_tokens': 2000,
             'system': _systemPrompt,
             'messages': [
@@ -100,9 +124,9 @@ Rules:
             ],
           }),
         )
-        .timeout(const Duration(seconds: 60));
+        .timeout(const Duration(seconds: 90));
     if (resp.statusCode != 200) {
-      throw Exception('API ${resp.statusCode}: ${resp.body}');
+      throw Exception('Anthropic ${resp.statusCode}: ${resp.body}');
     }
     final body = jsonDecode(resp.body) as Map<String, dynamic>;
     final text = ((body['content'] as List).first
@@ -110,8 +134,45 @@ Rules:
     return parseModelJson(text);
   }
 
+  Future<Map<String, dynamic>> _callGemini(String apiKey, String transcript) async {
+    final url =
+        'https://generativelanguage.googleapis.com/v1beta/models/$_geminiModel:generateContent?key=$apiKey';
+    final resp = await http
+        .post(
+          Uri.parse(url),
+          headers: {'content-type': 'application/json'},
+          body: jsonEncode({
+            'system_instruction': {
+              'parts': [
+                {'text': _systemPrompt}
+              ]
+            },
+            'contents': [
+              {
+                'parts': [
+                  {'text': 'Transcript:\n\n$transcript'}
+                ]
+              }
+            ],
+            'generationConfig': {
+              'maxOutputTokens': 2048,
+              'responseMimeType': 'application/json',
+            },
+          }),
+        )
+        .timeout(const Duration(seconds: 90));
+    if (resp.statusCode != 200) {
+      throw Exception('Gemini ${resp.statusCode}: ${resp.body}');
+    }
+    final body = jsonDecode(resp.body) as Map<String, dynamic>;
+    final cand = (body['candidates'] as List).first as Map<String, dynamic>;
+    final parts =
+        (cand['content'] as Map<String, dynamic>)['parts'] as List;
+    final text = (parts.first as Map<String, dynamic>)['text'] as String;
+    return parseModelJson(text);
+  }
+
   /// Robust parse: tolerates code fences and stray prose around the JSON.
-  /// Static + pure so the sandbox test harness can validate it with fixtures.
   static Map<String, dynamic> parseModelJson(String raw) {
     var s = raw.trim();
     final fence = RegExp(r'```(?:json)?\s*([\s\S]*?)```').firstMatch(s);
@@ -129,9 +190,20 @@ Rules:
   }
 
   static const _kinds = {'commitment', 'decision', 'fact', 'thread'};
+  static const _buckets = {
+    '1:1', 'Standup', 'Planning', 'Brainstorm', 'Decision/Review', 'Kickoff',
+    'Retro', 'Interview', 'Vendor/Sales', 'User-research', 'Status update',
+    'Deep-dive', 'Personal', 'Other'
+  };
 
   void _store(RecallDb db, int convId, Map<String, dynamic> json) {
-    // Names are not unique now — index name -> all matching person ids.
+    // Summary + bucket (W7/W13).
+    final summary = (json['summary'] as String?)?.trim();
+    var bucket = (json['bucket'] as String?)?.trim();
+    if (bucket != null && !_buckets.contains(bucket)) bucket = 'Other';
+    db.setConversationMemory(convId, summary: summary, bucket: bucket);
+
+    // Names are not unique — index name -> all matching person ids.
     final byName = <String, List<int>>{};
     for (final p in db.peopleList()) {
       byName.putIfAbsent(p.name.toLowerCase(), () => []).add(p.id);
@@ -147,9 +219,7 @@ Rules:
       final conf = (f['confidence'] is num)
           ? (f['confidence'] as num).toDouble().clamp(0.0, 1.0)
           : 0.5;
-      // Link only on a UNIQUE exact name match with decent confidence. If the
-      // name is ambiguous (two "Ravi"s) or unknown, keep the raw name and let a
-      // clarification resolve it — never file to the wrong person.
+      // Link only on a UNIQUE exact name match with decent confidence.
       int? personId;
       if (rawName != null && rawName.isNotEmpty && conf >= linkConfidence) {
         final matches = byName[rawName.toLowerCase()];

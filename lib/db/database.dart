@@ -153,11 +153,25 @@ class RecallDb {
         durationSec: (r['duration_sec'] as int?) ?? 0,
         peopleNames: (r['people_names'] as String?) ?? '',
         busy: ((r['busy'] as int?) ?? 0) > 0,
+        bucket: r['bucket'] as String?,
       );
+
+  /// W7/W13: store the AI summary + conversation type/bucket.
+  void setConversationMemory(int id, {String? summary, String? bucket}) {
+    if (summary != null) {
+      _db.execute('UPDATE conversations SET summary = ? WHERE id = ?',
+          [_nn(summary), id]);
+    }
+    if (bucket != null) {
+      _db.execute('UPDATE conversations SET bucket = ? WHERE id = ?',
+          [_nn(bucket), id]);
+    }
+  }
 
   ConversationDetail detail(int id) {
     final c = _db.select(
-        'SELECT id, title, happened_at, duration_sec, notes FROM conversations WHERE id = ?',
+        'SELECT id, title, happened_at, duration_sec, notes, summary, bucket '
+        'FROM conversations WHERE id = ?',
         [id]).first;
     List<Person> peopleByRole(String role) => _db
         .select(
@@ -206,6 +220,8 @@ class RecallDb {
       happenedAt: DateTime.parse(c['happened_at'] as String),
       durationSec: (c['duration_sec'] as int?) ?? 0,
       notes: c['notes'] as String?,
+      summary: c['summary'] as String?,
+      bucket: c['bucket'] as String?,
       people: people,
       mentioned: mentioned,
       topics: topics,

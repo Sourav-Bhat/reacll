@@ -112,7 +112,18 @@ class SampleData {
         personName: 'Sourav', confidence: 0.85, happenedAt: when,
         text: "Sourav's JIRA phase-2 access still pending.");
 
-    // Extraction already done (don't re-run against the Claude API).
+    // W7/W13: summary + conversation type.
+    db.setConversationMemory(convId,
+        summary:
+            'Andy onboarded Sourav as the FDE for ESG phase 2 — building all ESG '
+            'data points into one platform with back-end emissions calculations '
+            'for asset-level, near-real-time visibility. He flagged three risks '
+            '(no PM, duplicate PwC/EY audits, and a data-quality gate) and set '
+            'next steps: JIRA access via Ben, a tracker walkthrough next week, and '
+            'the north-south kickoff email to Rob.',
+        bucket: '1:1');
+
+    // Extraction already done (don't re-run against the API).
     db.queueExtraction(convId);
     db.setExtractionStatus(convId, 'done');
 

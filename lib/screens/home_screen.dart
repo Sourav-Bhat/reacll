@@ -145,19 +145,34 @@ class _ConvoCard extends StatelessWidget {
               Text('$date$dur',
                   style: t.textTheme.bodySmall
                       ?.copyWith(color: t.colorScheme.onSurfaceVariant)),
-              if (c.peopleNames.isNotEmpty) ...[
+              if (c.bucket != null || c.peopleNames.isNotEmpty) ...[
                 const SizedBox(height: 10),
                 Wrap(
                   spacing: 6,
                   runSpacing: 6,
-                  children: c.peopleNames.split(', ').map((n) => Chip(
-                        label: Text(n),
-                        backgroundColor: t.colorScheme.surfaceContainerHighest,
-                        labelStyle: t.textTheme.labelMedium?.copyWith(
-                            color: t.colorScheme.primary,
-                            fontWeight: FontWeight.w700),
+                  children: [
+                    if (c.bucket != null)
+                      Chip(
+                        label: Text(c.bucket!),
+                        backgroundColor: const Color(0xFFF5EBD6),
+                        labelStyle: const TextStyle(
+                            color: Color(0xFFB98A2F),
+                            fontWeight: FontWeight.w700,
+                            fontSize: 12),
                         visualDensity: VisualDensity.compact,
-                      )).toList(),
+                      ),
+                    ...c.peopleNames.isEmpty
+                        ? <Widget>[]
+                        : c.peopleNames.split(', ').map((n) => Chip(
+                              label: Text(n),
+                              backgroundColor:
+                                  t.colorScheme.surfaceContainerHighest,
+                              labelStyle: t.textTheme.labelMedium?.copyWith(
+                                  color: t.colorScheme.primary,
+                                  fontWeight: FontWeight.w700),
+                              visualDensity: VisualDensity.compact,
+                            )),
+                  ],
                 ),
               ],
             ],
