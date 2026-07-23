@@ -275,4 +275,29 @@ class VoiceIdService extends ChangeNotifier {
     db.linkSpeaker(conversationId, speakerLabel, personId, 1.0);
     db.tagPerson(conversationId, personId);
   }
+
+  /// W15: read-a-paragraph enrollment. Computes one embedding over a clean
+  /// single-speaker wav clip and stores it as a voice print. Returns an error
+  /// string, or null on success. (Same embedding path as diarization.)
+  Future<String?> enrollFromWav(RecallDb db, int personId, String wavPath) async {
+    try {
+      final models = await _ensureModels();
+      if (models == null) return lastError ?? 'Voice models unavailable';
+      sherpa.initBindings();
+      final samples = readWavMono16(await File(wavPath).readAsBytes());
+      if (samples.length < 16000) return 'Too short — record at least a sentence.';
+      final ex = sherpa.SpeakerEmbeddingExtractor(
+          config: sherpa.SpeakerEmbeddingExtractorConfig(model: models.$2));
+      final st = ex.createStream();
+      st.acceptWaveform(samples: samples, sampleRate: 16000);
+      st.inputFinished();
+      final emb = ex.compute(st);
+      st.free();
+      ex.free();
+      db.addVoicePrint(personId, embToBlob(emb), emb.length);
+      return null;
+    } catch (e) {
+      return 'Enrollment failed: $e';
+    }
+  }
 }

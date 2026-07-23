@@ -251,6 +251,12 @@ class RecallDb {
         "UPDATE artifacts SET status = 'pending' WHERE status = 'transcribing'");
   }
 
+  /// W5: point an artifact at its decoded 16 kHz WAV so diarization can read it.
+  void updateArtifactPath(int artifactId, String path) {
+    _db.execute(
+        'UPDATE artifacts SET file_path = ? WHERE id = ?', [path, artifactId]);
+  }
+
   List<Artifact> pendingAudioArtifacts() {
     return _db
         .select("SELECT id, conversation_id, kind, file_path, status FROM artifacts "

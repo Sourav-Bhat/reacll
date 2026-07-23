@@ -5,7 +5,6 @@ import 'package:ffmpeg_kit_flutter_new_min/ffmpeg_kit.dart';
 import 'package:ffmpeg_kit_flutter_new_min/return_code.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
-import 'package:path_provider/path_provider.dart';
 import 'package:whisper_ggml/whisper_ggml.dart';
 
 import '../db/database.dart';
@@ -43,9 +42,9 @@ class TranscriptionService extends ChangeNotifier {
   /// don't break the command. Returns the WAV path, or null on failure.
   Future<String?> _toWav16k(String inputPath) async {
     try {
-      final dir = await getTemporaryDirectory();
+      final dir = await mediaDir(); // persist so diarization can reuse it (W5)
       final out =
-          p.join(dir.path, 'tx_${DateTime.now().millisecondsSinceEpoch}.wav');
+          p.join(dir.path, 'dec_${DateTime.now().millisecondsSinceEpoch}.wav');
       final session = await FFmpegKit.execute(
           '-y -i "$inputPath" -ar 16000 -ac 1 -c:a pcm_s16le "$out"');
       final rc = await session.getReturnCode();
@@ -89,6 +88,8 @@ class TranscriptionService extends ChangeNotifier {
               throw Exception(lastError ?? 'Could not decode audio to WAV');
             }
             audioPath = wav;
+            // W5: repoint the artifact at the decoded wav so diarization can read it.
+            db.updateArtifactPath(a.id, wav);
           }
           final result = await _whisper.transcribe(
             model: model,
@@ -104,9 +105,9 @@ class TranscriptionService extends ChangeNotifier {
             db.setArtifactStatus(a.id, 'done');
             // Phase 2: hand the finished transcript to the extraction queue.
             db.queueExtraction(a.conversationId);
-            // Phase 3: diarize our own wav recordings (imported audio formats
-            // are not diarized in v3 — documented limitation).
-            if (a.kind == 'recording') db.queueDiarization(a.id);
+            // W5: diarize ALL audio now that imports are decoded to 16k wav —
+            // produces "Who was Speaker N?" clarifications to confirm speakers.
+            db.queueDiarization(a.id);
           }
         } catch (e) {
           db.setArtifactStatus(a.id, 'failed');

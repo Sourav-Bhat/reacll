@@ -52,8 +52,8 @@ def tx(a, c, t):
 def person(n):
     r = db.execute('SELECT id FROM people WHERE name=? COLLATE NOCASE', (n,)).fetchone()
     return r[0] if r else db.execute('INSERT INTO people (name) VALUES (?)', (n,)).lastrowid
-def tag(c, p):
-    db.execute('INSERT OR IGNORE INTO conversation_people VALUES (?,?)', (c, p))
+def tag(c, p, role='attendee'):
+    db.execute('INSERT OR IGNORE INTO conversation_people (conversation_id,person_id,role) VALUES (?,?,?)', (c, p, role))
 
 c1 = conv('Vendor pricing call', '2026-07-13 10:30', 1920)
 tx(art(c1, 'recording'), c1, 'Monthly budget add-on goes up 8 percent. Commit before the 25th to lock this pricing.')
@@ -68,8 +68,8 @@ check('T2 person filter', {h[0] for h in db.execute(SEARCH, (fts('budget'), ravi
 check('T3 snippet markers', '[' in hits[0][3])
 check('T4 stemming', c2 in {h[0] for h in db.execute(SEARCH, (fts('decisions'), None, None)).fetchall()})
 r1 = [r for r in db.execute(HOME, (100, 0)).fetchall() if r[0] == c2][0]
-check('T5 home people agg', 'Ravi' in r1[4] and 'Priya' in r1[4])
-check('T6 people counts', {r[1]: r[2] for r in db.execute(PEOPLE).fetchall()}['Ravi'] == 1)
+check('T5 home people agg', 'Ravi' in r1[5] and 'Priya' in r1[5])
+check('T6 people counts', {r[1]: r[4] for r in db.execute(PEOPLE).fetchall()}['Ravi'] == 1)
 check('T7 person convos', [r[0] for r in db.execute(PERSONC, (priya,)).fetchall()] == [c2])
 big = conv('bulk', '2025-01-01'); ab = art(big, 'transcript')
 for i in range(700):
@@ -155,6 +155,58 @@ linked = [f for f in kept if f.get('person') and (f.get('confidence') or 0.5) >=
 check('T23 store filters invalid kinds/empty text', len(kept) == 2)
 check('T24 low-confidence person not auto-linked', len(linked) == 1)
 check('T25 questions capped at 3', min(len(payload['questions']), 3) == 3)
+
+# ---------- v4-v6 additions: roles, contact cards, notes/summary/bucket, merge ----------
+cX = conv('Mentioned test', '2026-07-20 10:00')
+tag(cX, suresh, 'attendee')
+tag(cX, priya, 'mentioned')
+hx = [r for r in db.execute(HOME, (100, 0)).fetchall() if r[0] == cX][0]
+check('T26 home names exclude mentioned',
+      'Vendor A - Suresh' in (hx[5] or '') and 'Priya' not in (hx[5] or ''))
+check('T27 people count is attended-only',
+      {r[1]: r[4] for r in db.execute(PEOPLE).fetchall()}['Priya'] == 1)
+
+db.execute("UPDATE people SET company='Acme', role='AM', email='p@acme.co', notes='vip' WHERE id=?", (priya,))
+check('T28 contact card fields',
+      db.execute('SELECT company,role,email,notes FROM people WHERE id=?', (priya,)).fetchone()
+      == ('Acme', 'AM', 'p@acme.co', 'vip'))
+
+db.execute("INSERT INTO people (name, company) VALUES ('Priya','Beta')")
+check('T29 duplicate names allowed',
+      db.execute("SELECT count(*) FROM people WHERE name='Priya'").fetchone()[0] == 2)
+
+db.execute("UPDATE conversations SET notes=?, summary=?, bucket=? WHERE id=?",
+           ('my note', 'a summary', '1:1', c2))
+check('T30 conversation notes/summary/bucket',
+      db.execute('SELECT notes,summary,bucket FROM conversations WHERE id=?', (c2,)).fetchone()
+      == ('my note', 'a summary', '1:1'))
+
+# merge SQL (mirror of RecallDb.mergePerson): fold a whisper-dup into ravi
+dup = person('Surab')
+tag(c1, dup, 'attendee')
+fact(c1, dup, 'fact', 'from dup', '2026-07-13 10:30')
+db.execute('UPDATE facts SET person_id=? WHERE person_id=?', (ravi, dup))
+db.execute("INSERT INTO conversation_people (conversation_id,person_id,role) "
+           "SELECT conversation_id, ?, role FROM conversation_people WHERE person_id=? "
+           "ON CONFLICT(conversation_id,person_id) DO UPDATE SET role="
+           "CASE WHEN conversation_people.role='attendee' OR excluded.role='attendee' "
+           "THEN 'attendee' ELSE 'mentioned' END", (ravi, dup))
+db.execute('DELETE FROM conversation_people WHERE person_id=?', (dup,))
+db.execute('DELETE FROM people WHERE id=?', (dup,))
+check('T31 merge moves facts',
+      db.execute("SELECT count(*) FROM facts WHERE person_id=? AND text='from dup'", (ravi,)).fetchone()[0] == 1)
+check('T32 merge removes dup', db.execute('SELECT count(*) FROM people WHERE id=?', (dup,)).fetchone()[0] == 0)
+
+# W9: reset stuck 'transcribing' -> 'pending'
+sa = art(c1, 'recording', status='transcribing')
+db.execute("UPDATE artifacts SET status='pending' WHERE status='transcribing'")
+check('T33 reset stuck transcription',
+      db.execute('SELECT status FROM artifacts WHERE id=?', (sa,)).fetchone()[0] == 'pending')
+
+# delete cascades conversation_people
+db.execute('DELETE FROM conversations WHERE id=?', (cX,))
+check('T34 delete cascades tags',
+      db.execute('SELECT count(*) FROM conversation_people WHERE conversation_id=?', (cX,)).fetchone()[0] == 0)
 
 print()
 print('RESULT:', 'ALL PASS' if not fails else f'FAILURES: {fails}')

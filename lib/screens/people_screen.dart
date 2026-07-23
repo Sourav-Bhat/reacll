@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import '../main.dart';
 import '../models.dart';
 import 'detail_screen.dart';
+import 'enroll_voice_screen.dart';
 import 'person_form.dart';
 
 class PeopleScreen extends StatelessWidget {
@@ -174,6 +175,13 @@ class _PersonScreenState extends State<PersonScreen> {
     if (mounted) Navigator.pop(context); // merged away -> back to list
   }
 
+  /// W15: record a clean sample and enroll this person's voice.
+  Future<void> _enroll() async {
+    await Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) => EnrollVoiceScreen(person: widget.person)));
+    if (mounted) setState(() {});
+  }
+
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context);
@@ -190,9 +198,18 @@ class _PersonScreenState extends State<PersonScreen> {
           backgroundColor: Colors.transparent,
           actions: [
             PopupMenuButton<String>(
-              onSelected: (v) => v == 'edit' ? _edit() : _merge(),
+              onSelected: (v) {
+                if (v == 'edit') {
+                  _edit();
+                } else if (v == 'merge') {
+                  _merge();
+                } else {
+                  _enroll();
+                }
+              },
               itemBuilder: (context) => const [
                 PopupMenuItem(value: 'edit', child: Text('Edit contact')),
+                PopupMenuItem(value: 'enroll', child: Text('Enroll voice')),
                 PopupMenuItem(value: 'merge', child: Text('Merge into…')),
               ],
             ),
