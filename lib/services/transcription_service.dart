@@ -66,6 +66,9 @@ class TranscriptionService extends ChangeNotifier {
   Future<void> pump(RecallDb db) async {
     if (_running) return;
     _running = true;
+    // W9: recover any job left 'transcribing' by a killed session (no pump is
+    // running here, so anything still 'transcribing' is stale) -> retry it.
+    db.resetStuckTranscriptions();
     notifyListeners();
     try {
       while (true) {

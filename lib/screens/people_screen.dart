@@ -132,6 +132,48 @@ class _PersonScreenState extends State<PersonScreen> {
     if (mounted) setState(() {});
   }
 
+  /// W18: fold this contact (e.g. a whisper-mangled duplicate) into another.
+  Future<void> _merge() async {
+    final t = Theme.of(context);
+    final others =
+        db.peopleList().where((p) => p.id != widget.person.id).toList();
+    if (others.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No other contacts to merge into.')));
+      return;
+    }
+    final targetId = await showModalBottomSheet<int>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          padding: const EdgeInsets.fromLTRB(22, 0, 22, 24),
+          children: [
+            Text('Merge "${widget.person.name}" into…',
+                style: t.textTheme.headlineSmall),
+            const SizedBox(height: 4),
+            Text(
+                'Moves all facts, tags and voice prints, then removes this '
+                'contact. Cannot be undone.',
+                style: t.textTheme.bodySmall
+                    ?.copyWith(color: t.colorScheme.onSurfaceVariant)),
+            const SizedBox(height: 12),
+            ...others.map((p) => ListTile(
+                  leading: const Icon(Icons.merge_type),
+                  title: Text(p.name),
+                  subtitle: p.subtitle != null ? Text(p.subtitle!) : null,
+                  onTap: () => Navigator.pop(context, p.id),
+                )),
+          ],
+        ),
+      ),
+    );
+    if (targetId == null) return;
+    db.mergePerson(widget.person.id, targetId);
+    if (mounted) Navigator.pop(context); // merged away -> back to list
+  }
+
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context);
@@ -147,10 +189,12 @@ class _PersonScreenState extends State<PersonScreen> {
           title: Text(person.name, style: t.textTheme.headlineSmall),
           backgroundColor: Colors.transparent,
           actions: [
-            IconButton(
-              icon: const Icon(Icons.edit_outlined),
-              tooltip: 'Edit contact',
-              onPressed: _edit,
+            PopupMenuButton<String>(
+              onSelected: (v) => v == 'edit' ? _edit() : _merge(),
+              itemBuilder: (context) => const [
+                PopupMenuItem(value: 'edit', child: Text('Edit contact')),
+                PopupMenuItem(value: 'merge', child: Text('Merge into…')),
+              ],
             ),
           ],
           bottom: const TabBar(tabs: [

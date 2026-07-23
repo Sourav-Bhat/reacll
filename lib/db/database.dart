@@ -244,6 +244,13 @@ class RecallDb {
     _db.execute('UPDATE artifacts SET status = ? WHERE id = ?', [status, artifactId]);
   }
 
+  /// W9: a killed app can leave an artifact stuck on 'transcribing' forever.
+  /// Reset any such artifacts to 'pending' so the queue retries them.
+  void resetStuckTranscriptions() {
+    _db.execute(
+        "UPDATE artifacts SET status = 'pending' WHERE status = 'transcribing'");
+  }
+
   List<Artifact> pendingAudioArtifacts() {
     return _db
         .select("SELECT id, conversation_id, kind, file_path, status FROM artifacts "
