@@ -19,6 +19,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late final TextEditingController _geminiCtl;
   late final TextEditingController _hfTokenCtl;
   String _provider = 'anthropic';
+  String _secondary = 'none';
   bool _sampleLoaded = false;
   String _version = '';
 
@@ -32,6 +33,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _hfTokenCtl = TextEditingController(
         text: db.getSetting(LocalLlmService.settingHfToken) ?? '');
     _provider = db.getSetting(ExtractionService.settingProvider) ?? 'anthropic';
+    _secondary = db.getSetting(ExtractionService.settingSecondary) ?? 'none';
     _sampleLoaded = SampleData.isLoaded(db);
     LocalLlmService.instance.addListener(_onLocal);
     PackageInfo.fromPlatform().then((i) {
@@ -52,27 +54,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _geminiCtl.dispose();
     _hfTokenCtl.dispose();
     super.dispose();
-  }
-
-  Widget _provTab(ThemeData t, String id, String label) {
-    final on = _provider == id;
-    return Expanded(
-      child: GestureDetector(
-        onTap: () => setState(() => _provider = id),
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 12),
-          decoration: BoxDecoration(
-              color: on ? t.colorScheme.primary : Colors.transparent,
-              borderRadius: BorderRadius.circular(12)),
-          alignment: Alignment.center,
-          child: Text(label,
-              style: TextStyle(
-                  fontWeight: FontWeight.w600,
-                  fontSize: 13,
-                  color: on ? Colors.white : t.colorScheme.onSurfaceVariant)),
-        ),
-      ),
-    );
   }
 
   @override
@@ -96,26 +77,84 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ?.copyWith(color: t.colorScheme.onSurfaceVariant, height: 1.5),
           ),
           const SizedBox(height: 14),
-          Container(
-            decoration: BoxDecoration(
-                border: Border.all(color: t.colorScheme.outlineVariant),
-                borderRadius: BorderRadius.circular(14)),
-            padding: const EdgeInsets.all(3),
-            child: Row(children: [
-              _provTab(t, 'anthropic', 'Anthropic'),
-              _provTab(t, 'gemini', 'Gemini'),
-              _provTab(t, 'local', 'Local'),
-            ]),
+          Text('Primary',
+              style:
+                  t.textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w700)),
+          const SizedBox(height: 6),
+          Wrap(spacing: 8, children: [
+            for (final o in const [
+              ('anthropic', 'Anthropic'),
+              ('gemini', 'Gemini'),
+              ('local', 'Local')
+            ])
+              ChoiceChip(
+                label: Text(o.$2),
+                selected: _provider == o.$1,
+                onSelected: (_) => setState(() => _provider = o.$1),
+              ),
+          ]),
+          const SizedBox(height: 12),
+          Text('Fallback (used if the primary fails)',
+              style:
+                  t.textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w700)),
+          const SizedBox(height: 6),
+          Wrap(spacing: 8, children: [
+            for (final o in const [
+              ('none', 'None'),
+              ('anthropic', 'Anthropic'),
+              ('gemini', 'Gemini'),
+              ('local', 'Local')
+            ])
+              ChoiceChip(
+                label: Text(o.$2),
+                selected: _secondary == o.$1,
+                onSelected: (_) => setState(() => _secondary = o.$1),
+              ),
+          ]),
+          const SizedBox(height: 18),
+          const Divider(),
+          const SizedBox(height: 12),
+          Text('Anthropic (Claude)',
+              style:
+                  t.textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w700)),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _keyCtl,
+            obscureText: true,
+            decoration: InputDecoration(
+              labelText: 'Anthropic API key',
+              hintText: 'sk-ant-…',
+              border:
+                  OutlineInputBorder(borderRadius: BorderRadius.circular(18)),
+            ),
           ),
-          const SizedBox(height: 14),
-          if (_provider == 'local') ...[
-            Text(
-                'Runs fully on-device — nothing (not even transcript text) leaves '
-                'your phone. Pick a model and download it once.',
-                style: t.textTheme.bodySmall?.copyWith(
-                    color: t.colorScheme.onSurfaceVariant, height: 1.5)),
-            const SizedBox(height: 12),
-            Builder(builder: (_) {
+          const SizedBox(height: 16),
+          Text('Google Gemini',
+              style:
+                  t.textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w700)),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _geminiCtl,
+            obscureText: true,
+            decoration: InputDecoration(
+              labelText: 'Gemini API key',
+              hintText: 'AIza…',
+              border:
+                  OutlineInputBorder(borderRadius: BorderRadius.circular(18)),
+            ),
+          ),
+          const SizedBox(height: 16),
+          Text('On-device (Local)',
+              style:
+                  t.textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w700)),
+          const SizedBox(height: 4),
+          Text(
+              'Runs fully on-device — nothing (not even transcript text) leaves '
+              'your phone. Pick a model and download it once.',
+              style: t.textTheme.bodySmall?.copyWith(
+                  color: t.colorScheme.onSurfaceVariant, height: 1.5)),
+          const SizedBox(height: 12),
+          Builder(builder: (_) {
               final local = LocalLlmService.instance;
               final selectedId = local.selectedModel(db).id;
               return Column(
@@ -216,23 +255,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ],
               );
             }),
-          ] else
-            TextField(
-              controller: _provider == 'gemini' ? _geminiCtl : _keyCtl,
-              obscureText: true,
-              decoration: InputDecoration(
-                labelText: _provider == 'gemini'
-                    ? 'Gemini API key'
-                    : 'Anthropic API key',
-                hintText: _provider == 'gemini' ? 'AIza…' : 'sk-ant-…',
-                border:
-                    OutlineInputBorder(borderRadius: BorderRadius.circular(18)),
-              ),
-            ),
           const SizedBox(height: 16),
           FilledButton(
             onPressed: () {
               db.setSetting(ExtractionService.settingProvider, _provider);
+              db.setSetting(ExtractionService.settingSecondary, _secondary);
               db.setSetting(
                   ExtractionService.settingApiKey, _keyCtl.text.trim());
               db.setSetting(

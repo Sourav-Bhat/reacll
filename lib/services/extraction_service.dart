@@ -7,28 +7,18 @@ import 'package:http/http.dart' as http;
 import '../db/database.dart';
 import 'local_llm_service.dart';
 
-/// FR-9 + FR-11 + W6/W7/W8/W13: structured extraction (TEXT ONLY — audio never
+/// FR-9 + W6/W7/W8/W13/W14: structured extraction (TEXT ONLY — audio never
 /// leaves the device). Produces a summary, a conversation type/bucket, typed
-/// facts (commitments/decisions/facts/threads) and clarification questions,
-/// via Anthropic (Claude) or Google (Gemini) — user's choice.
-///
-/// Model JSON contract (strict):
-/// {
-///   "summary": "2-4 sentence recap",
-///   "bucket": "1:1 | Standup | Planning | Brainstorm | Decision/Review |
-///              Kickoff | Retro | Interview | Vendor/Sales | User-research |
-///              Status update | Deep-dive | Personal | Other",
-///   "facts": [{"kind":"commitment|decision|fact|thread","text":"...",
-///              "person":"name or null","due":"free text or null",
-///              "confidence":0.0-1.0}],
-///   "questions": [{"question":"...","reason":"..."}]   // max 3
-/// }
+/// facts and clarification questions, via the user's chosen PRIMARY provider,
+/// falling back to a SECONDARY provider if the primary fails. Providers:
+/// Anthropic (Claude), Google (Gemini), or fully-local (Gemma/Qwen on-device).
 class ExtractionService extends ChangeNotifier {
   ExtractionService._();
   static final ExtractionService instance = ExtractionService._();
 
   // Settings keys.
-  static const settingProvider = 'ai_provider'; // 'anthropic' | 'gemini'
+  static const settingProvider = 'ai_provider'; // primary
+  static const settingSecondary = 'ai_provider_secondary'; // fallback | 'none'
   static const settingApiKey = 'anthropic_api_key';
   static const settingGeminiKey = 'gemini_api_key';
 
@@ -37,7 +27,7 @@ class ExtractionService extends ChangeNotifier {
   static const _geminiModel = 'gemini-2.0-flash';
 
   static const maxQuestions = 3;
-  static const linkConfidence = 0.75; // below this, don't auto-file to a person
+  static const linkConfidence = 0.75;
 
   bool _running = false;
   bool get isRunning => _running;
@@ -62,32 +52,82 @@ Rules:
 - thread: an open question or unresolved topic to follow up.
 - Extract only what is genuinely useful for recall; quality over quantity.
 - Use a name only if it appears in the transcript; otherwise null.
-- questions: at MOST 3, ONLY where ambiguity blocks filing something important
-  (unknown person for a commitment, missing owner/deadline, unclear referent).
+- questions: at MOST 3, ONLY where ambiguity blocks filing something important.
   If nothing important is ambiguous, return an empty questions list.
 ''';
 
-  /// Drain all pending extractions. No-op without a key (status 'skipped').
-  Future<void> pump(RecallDb db) async {
-    if (_running) return;
-    final provider = db.getSetting(settingProvider) ?? 'anthropic';
-    final isLocal = provider == 'local';
-    final apiKey = provider == 'gemini'
+  // ---------------- provider chain ----------------
+
+  /// Ordered providers to try: primary, then a distinct secondary if set.
+  List<String> _chain(RecallDb db) {
+    final primary = db.getSetting(settingProvider) ?? 'anthropic';
+    final secondary = db.getSetting(settingSecondary);
+    return [
+      primary,
+      if (secondary != null &&
+          secondary.isNotEmpty &&
+          secondary != 'none' &&
+          secondary != primary)
+        secondary,
+    ];
+  }
+
+  bool _configured(RecallDb db, String provider) {
+    switch (provider) {
+      case 'local':
+        return LocalLlmService.instance.isInstalled(db);
+      case 'gemini':
+        return (db.getSetting(settingGeminiKey) ?? '').isNotEmpty;
+      default:
+        return (db.getSetting(settingApiKey) ?? '').isNotEmpty;
+    }
+  }
+
+  /// One completion with a specific provider (throws if not configured).
+  Future<String> _completeWith(
+      RecallDb db, String provider, String system, String user) async {
+    if (provider == 'local') {
+      return LocalLlmService.instance.complete(db, system: system, user: user);
+    }
+    final key = provider == 'gemini'
         ? db.getSetting(settingGeminiKey)
         : db.getSetting(settingApiKey);
+    if (key == null || key.isEmpty) {
+      throw Exception(
+          'No ${provider == 'gemini' ? 'Gemini' : 'Anthropic'} API key set');
+    }
+    return provider == 'gemini'
+        ? _rawGemini(key, system, user)
+        : _rawClaude(key, system, user);
+  }
+
+  /// Public single-shot completion (Ask / RAG). Primary → secondary fallback.
+  Future<String> complete(RecallDb db,
+      {required String system, required String user}) async {
+    Object? lastErr;
+    for (final p in _chain(db)) {
+      try {
+        return await _completeWith(db, p, system, user);
+      } catch (e) {
+        lastErr = e;
+      }
+    }
+    throw lastErr ?? Exception('No AI provider configured (Settings).');
+  }
+
+  // ---------------- extraction queue ----------------
+
+  Future<void> pump(RecallDb db) async {
+    if (_running) return;
+    final chain = _chain(db);
+    final configured = chain.where((p) => _configured(db, p)).toList();
     _running = true;
     notifyListeners();
     try {
       for (final convId in db.pendingExtractions()) {
-        if (isLocal) {
-          if (!LocalLlmService.instance.isInstalled(db)) {
-            db.setExtractionStatus(convId, 'skipped',
-                error: 'On-device Gemma model not downloaded');
-            continue;
-          }
-        } else if (apiKey == null || apiKey.isEmpty) {
+        if (configured.isEmpty) {
           db.setExtractionStatus(convId, 'skipped',
-              error: 'No ${provider == 'gemini' ? 'Gemini' : 'Anthropic'} API key');
+              error: 'No AI provider configured');
           continue;
         }
         db.setExtractionStatus(convId, 'running');
@@ -98,16 +138,20 @@ Rules:
             db.setExtractionStatus(convId, 'skipped', error: 'No transcript');
             continue;
           }
-          final Map<String, dynamic> json;
-          if (isLocal) {
-            json = parseModelJson(await LocalLlmService.instance.complete(db,
-                system: _systemPrompt,
-                user: 'Transcript:\n\n${detail.transcriptText}'));
-          } else if (provider == 'gemini') {
-            json = await _callGemini(apiKey!, detail.transcriptText);
-          } else {
-            json = await _callClaude(apiKey!, detail.transcriptText);
+          final userMsg = 'Transcript:\n\n${detail.transcriptText}';
+          Map<String, dynamic>? json;
+          Object? err;
+          for (final p in configured) {
+            try {
+              json = parseModelJson(
+                  await _completeWith(db, p, _systemPrompt, userMsg));
+              err = null;
+              break;
+            } catch (e) {
+              err = e;
+            }
           }
+          if (json == null) throw err ?? Exception('Extraction failed');
           _store(db, convId, json);
           db.setExtractionStatus(convId, 'done');
         } catch (e) {
@@ -121,33 +165,7 @@ Rules:
     }
   }
 
-  Future<Map<String, dynamic>> _callClaude(String apiKey, String transcript) async =>
-      parseModelJson(
-          await _rawClaude(apiKey, _systemPrompt, 'Transcript:\n\n$transcript'));
-
-  Future<Map<String, dynamic>> _callGemini(String apiKey, String transcript) async =>
-      parseModelJson(
-          await _rawGemini(apiKey, _systemPrompt, 'Transcript:\n\n$transcript'));
-
-  /// Public single-shot completion for the Ask / RAG feature. Uses the user's
-  /// selected provider + key, returns raw model text.
-  Future<String> complete(RecallDb db,
-      {required String system, required String user}) async {
-    final provider = db.getSetting(settingProvider) ?? 'anthropic';
-    if (provider == 'local') {
-      return LocalLlmService.instance.complete(db, system: system, user: user);
-    }
-    final apiKey = provider == 'gemini'
-        ? db.getSetting(settingGeminiKey)
-        : db.getSetting(settingApiKey);
-    if (apiKey == null || apiKey.isEmpty) {
-      throw Exception(
-          'No ${provider == 'gemini' ? 'Gemini' : 'Anthropic'} API key set in Settings');
-    }
-    return provider == 'gemini'
-        ? _rawGemini(apiKey, system, user)
-        : _rawClaude(apiKey, system, user);
-  }
+  // ---------------- raw provider calls ----------------
 
   Future<String> _rawClaude(String apiKey, String system, String user) async {
     final resp = await http
@@ -234,13 +252,11 @@ Rules:
   };
 
   void _store(RecallDb db, int convId, Map<String, dynamic> json) {
-    // Summary + bucket (W7/W13).
     final summary = (json['summary'] as String?)?.trim();
     var bucket = (json['bucket'] as String?)?.trim();
     if (bucket != null && !_buckets.contains(bucket)) bucket = 'Other';
     db.setConversationMemory(convId, summary: summary, bucket: bucket);
 
-    // Names are not unique — index name -> all matching person ids.
     final byName = <String, List<int>>{};
     for (final p in db.peopleList()) {
       byName.putIfAbsent(p.name.toLowerCase(), () => []).add(p.id);
@@ -256,7 +272,6 @@ Rules:
       final conf = (f['confidence'] is num)
           ? (f['confidence'] as num).toDouble().clamp(0.0, 1.0)
           : 0.5;
-      // Link only on a UNIQUE exact name match with decent confidence.
       int? personId;
       if (rawName != null && rawName.isNotEmpty && conf >= linkConfidence) {
         final matches = byName[rawName.toLowerCase()];

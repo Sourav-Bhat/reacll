@@ -84,7 +84,8 @@ class _AudioBarState extends State<AudioBar> {
         ),
         Padding(
           padding: const EdgeInsets.only(right: 12),
-          child: Text(_fmt(_pos), style: t.textTheme.labelSmall),
+          child: Text('${_fmt(_pos)} / ${_fmt(_dur)}',
+              style: t.textTheme.labelSmall),
         ),
       ]),
     );

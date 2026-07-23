@@ -33,17 +33,25 @@ class LocalLlmService extends ChangeNotifier {
   static const models = <LocalModel>[
     LocalModel(
       'qwen05',
-      'Qwen 2.5 · 0.5B — fastest, lowest RAM',
+      'Qwen 2.5 · 0.5B — fast, balanced (recommended)',
       '~0.6 GB · no sign-in',
       'https://huggingface.co/litert-community/Qwen2.5-0.5B-Instruct/resolve/main/Qwen2.5-0.5B-Instruct_multi-prefill-seq_q8_ekv1280.task',
-      ModelType.general,
+      ModelType.qwen,
       false,
     ),
     LocalModel(
       'qwen15',
-      'Qwen 2.5 · 1.5B — better quality',
+      'Qwen 2.5 · 1.5B — best quality',
       '~1.6 GB · no sign-in',
       'https://huggingface.co/litert-community/Qwen2.5-1.5B-Instruct/resolve/main/Qwen2.5-1.5B-Instruct_seq128_q8_ekv1280.task',
+      ModelType.qwen,
+      false,
+    ),
+    LocalModel(
+      'smol135',
+      'SmolLM · 135M — tiny (low-end / testing)',
+      '~0.15 GB · no sign-in',
+      'https://huggingface.co/litert-community/SmolLM-135M-Instruct/resolve/main/SmolLM-135M-Instruct_multi-prefill-seq_q8_ekv1280.task',
       ModelType.general,
       false,
     ),

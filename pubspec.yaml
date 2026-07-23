@@ -1,7 +1,7 @@
 name: recall
 description: "Recall - personal conversation memory. Record, import, transcribe on-device, tag people, search everything."
 publish_to: 'none'
-version: 0.4.1+13
+version: 0.5.1+15
 
 environment:
   sdk: '>=3.4.0 <4.0.0'
