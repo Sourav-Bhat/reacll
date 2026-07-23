@@ -272,7 +272,7 @@ class _DetailScreenState extends State<DetailScreen> {
           );
         }),
         if (busy)
-          Card(
+          const Card(
             child: ListTile(
               leading: const SizedBox(
                   width: 22,
@@ -487,7 +487,7 @@ class _DetailScreenState extends State<DetailScreen> {
         // transcription status
         if (busy) ...[
           const SizedBox(height: 12),
-          Card(
+          const Card(
             child: ListTile(
               leading: const SizedBox(
                   width: 22,

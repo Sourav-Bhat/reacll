@@ -17,7 +17,6 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   late final TextEditingController _keyCtl;
   late final TextEditingController _geminiCtl;
-  late final TextEditingController _modelUrlCtl;
   late final TextEditingController _hfTokenCtl;
   String _provider = 'anthropic';
   bool _sampleLoaded = false;
@@ -30,8 +29,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
         text: db.getSetting(ExtractionService.settingApiKey) ?? '');
     _geminiCtl = TextEditingController(
         text: db.getSetting(ExtractionService.settingGeminiKey) ?? '');
-    _modelUrlCtl = TextEditingController(
-        text: db.getSetting(LocalLlmService.settingModelUrl) ?? '');
     _hfTokenCtl = TextEditingController(
         text: db.getSetting(LocalLlmService.settingHfToken) ?? '');
     _provider = db.getSetting(ExtractionService.settingProvider) ?? 'anthropic';
@@ -53,7 +50,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     LocalLlmService.instance.removeListener(_onLocal);
     _keyCtl.dispose();
     _geminiCtl.dispose();
-    _modelUrlCtl.dispose();
     _hfTokenCtl.dispose();
     super.dispose();
   }
@@ -114,50 +110,89 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const SizedBox(height: 14),
           if (_provider == 'local') ...[
             Text(
-                'Runs Gemma fully on-device — nothing (not even transcript text) '
-                'leaves your phone. Download the model once (~1 GB).',
+                'Runs fully on-device — nothing (not even transcript text) leaves '
+                'your phone. Pick a model and download it once.',
                 style: t.textTheme.bodySmall?.copyWith(
                     color: t.colorScheme.onSurfaceVariant, height: 1.5)),
             const SizedBox(height: 12),
-            TextField(
-              controller: _modelUrlCtl,
-              decoration: InputDecoration(
-                labelText: 'Model URL (.task) — optional',
-                hintText: 'blank = default Gemma 3 1B',
-                border:
-                    OutlineInputBorder(borderRadius: BorderRadius.circular(18)),
-              ),
-            ),
-            const SizedBox(height: 10),
-            TextField(
-              controller: _hfTokenCtl,
-              obscureText: true,
-              decoration: InputDecoration(
-                labelText: 'Hugging Face token (if the model is gated)',
-                border:
-                    OutlineInputBorder(borderRadius: BorderRadius.circular(18)),
-              ),
-            ),
-            const SizedBox(height: 12),
             Builder(builder: (_) {
               final local = LocalLlmService.instance;
-              if (local.isDownloading) {
-                final pct = ((local.downloadProgress ?? 0) * 100).round();
-                return Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      LinearProgressIndicator(value: local.downloadProgress),
-                      const SizedBox(height: 6),
-                      Text('Downloading model… $pct%',
-                          textAlign: TextAlign.center,
-                          style: t.textTheme.bodySmall),
-                    ]);
-              }
-              final installed = local.isInstalled(db);
+              final selectedId = local.selectedModel(db).id;
               return Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    if (installed)
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  ...LocalLlmService.models.map((m) {
+                    final on = m.id == selectedId;
+                    return InkWell(
+                      onTap: local.isDownloading
+                          ? null
+                          : () {
+                              db.setSetting(
+                                  LocalLlmService.settingModelId, m.id);
+                              setState(() {});
+                            },
+                      borderRadius: BorderRadius.circular(14),
+                      child: Container(
+                        margin: const EdgeInsets.only(bottom: 8),
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          border: Border.all(
+                              color: on
+                                  ? t.colorScheme.primary
+                                  : t.colorScheme.outlineVariant,
+                              width: on ? 2 : 1),
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        child: Row(children: [
+                          Icon(
+                              on
+                                  ? Icons.radio_button_checked
+                                  : Icons.radio_button_unchecked,
+                              size: 20,
+                              color: on
+                                  ? t.colorScheme.primary
+                                  : t.colorScheme.onSurfaceVariant),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(m.label,
+                                    style: t.textTheme.bodyMedium?.copyWith(
+                                        fontWeight: FontWeight.w600)),
+                                Text(m.size,
+                                    style: t.textTheme.bodySmall?.copyWith(
+                                        color: t.colorScheme.onSurfaceVariant)),
+                              ],
+                            ),
+                          ),
+                        ]),
+                      ),
+                    );
+                  }),
+                  if (local.selectedModel(db).gated) ...[
+                    const SizedBox(height: 2),
+                    TextField(
+                      controller: _hfTokenCtl,
+                      obscureText: true,
+                      decoration: InputDecoration(
+                        labelText:
+                            'Hugging Face token (free — this model is gated)',
+                        border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(18)),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                  ],
+                  if (local.isDownloading) ...[
+                    LinearProgressIndicator(value: local.downloadProgress),
+                    const SizedBox(height: 6),
+                    Text(
+                        'Downloading… ${((local.downloadProgress ?? 0) * 100).round()}%',
+                        textAlign: TextAlign.center,
+                        style: t.textTheme.bodySmall),
+                  ] else ...[
+                    if (local.isInstalled(db))
                       Text('✓ Model ready — extraction & Ask run offline.',
                           style: t.textTheme.bodySmall
                               ?.copyWith(color: t.colorScheme.primary)),
@@ -168,17 +203,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     const SizedBox(height: 8),
                     OutlinedButton.icon(
                       onPressed: () async {
-                        db.setSetting(LocalLlmService.settingModelUrl,
-                            _modelUrlCtl.text.trim());
                         db.setSetting(LocalLlmService.settingHfToken,
                             _hfTokenCtl.text.trim());
                         await LocalLlmService.instance.download(db);
                       },
                       icon: const Icon(Icons.download),
-                      label:
-                          Text(installed ? 'Re-download model' : 'Download model'),
+                      label: Text(local.isInstalled(db)
+                          ? 'Re-download model'
+                          : 'Download model'),
                     ),
-                  ]);
+                  ],
+                ],
+              );
             }),
           ] else
             TextField(
@@ -201,8 +237,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ExtractionService.settingApiKey, _keyCtl.text.trim());
               db.setSetting(
                   ExtractionService.settingGeminiKey, _geminiCtl.text.trim());
-              db.setSetting(
-                  LocalLlmService.settingModelUrl, _modelUrlCtl.text.trim());
               db.setSetting(
                   LocalLlmService.settingHfToken, _hfTokenCtl.text.trim());
               ScaffoldMessenger.of(context).showSnackBar(

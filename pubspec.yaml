@@ -1,7 +1,7 @@
 name: recall
 description: "Recall - personal conversation memory. Record, import, transcribe on-device, tag people, search everything."
 publish_to: 'none'
-version: 0.4.0+12
+version: 0.4.1+13
 
 environment:
   sdk: '>=3.4.0 <4.0.0'
@@ -19,7 +19,7 @@ dependencies:
   sherpa_onnx: ^1.13.2
   archive: ^3.6.1                   # unpack segmentation model tar.bz2
   # storage - bundled modern SQLite with FTS5 guaranteed
-  sqlite3: ^2.4.6
+  sqlite3: ^3.5.0
   sqlite3_flutter_libs: ^0.5.24
   # imports
   receive_sharing_intent: ^1.8.1    # Android share-sheet (audio + text)
