@@ -7,6 +7,7 @@ import '../models.dart';
 import '../services/extraction_service.dart';
 import '../services/transcription_service.dart';
 import '../services/voice_id_service.dart';
+import 'audio_bar.dart';
 import 'people_screen.dart';
 import 'person_form.dart';
 import 'tag_screen.dart';
@@ -257,6 +258,19 @@ class _DetailScreenState extends State<DetailScreen> {
     return ListView(
       padding: const EdgeInsets.fromLTRB(22, 16, 22, 40),
       children: [
+        // Listen back to the recorded/imported audio.
+        Builder(builder: (context) {
+          final audio = d.artifacts
+              .where((a) =>
+                  (a.kind == 'recording' || a.kind == 'imported_audio') &&
+                  a.filePath != null)
+              .toList();
+          if (audio.isEmpty) return const SizedBox.shrink();
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 14),
+            child: AudioBar(path: audio.first.filePath!),
+          );
+        }),
         if (busy)
           Card(
             child: ListTile(

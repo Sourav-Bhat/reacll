@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../main.dart';
+import '../services/extraction_service.dart';
 import '../services/import_service.dart';
 import '../services/transcription_service.dart';
 import 'add_screen.dart';
@@ -42,6 +43,9 @@ class _HomeShellState extends State<HomeShell> {
     if (needsTranscription) {
       // ignore: unawaited_futures
       TranscriptionService.instance.pump(db);
+    } else {
+      // ignore: unawaited_futures
+      ExtractionService.instance.pump(db);
     }
     if (existingId == null) {
       await Navigator.of(context).push(MaterialPageRoute(

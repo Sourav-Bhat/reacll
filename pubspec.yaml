@@ -1,7 +1,7 @@
 name: recall
 description: "Recall - personal conversation memory. Record, import, transcribe on-device, tag people, search everything."
 publish_to: 'none'
-version: 0.1.0
+version: 0.4.0+12
 
 environment:
   sdk: '>=3.4.0 <4.0.0'
@@ -29,6 +29,8 @@ dependencies:
   path_provider: ^2.1.4
   path: ^1.9.0
   cryptography: ^2.7.0              # PBKDF2 + AES-GCM for encrypted backup
+  flutter_gemma: ^0.15.0           # W14: on-device Gemma (fully offline) LLM
+  audioplayers: ^6.1.0             # play back imported/recorded audio
   intl: ^0.19.0
   google_fonts: ^6.2.1              # Fraunces + Inter (2026 design)
   package_info_plus: ^8.0.0        # show app version in Settings

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../main.dart';
 import '../services/backup_service.dart';
+import '../services/extraction_service.dart';
 import '../services/import_service.dart';
 import '../services/transcription_service.dart';
 import 'attach_picker.dart';
@@ -44,6 +45,10 @@ class AddScreen extends StatelessWidget {
     if (needsTx) {
       // ignore: unawaited_futures
       TranscriptionService.instance.pump(db);
+    } else {
+      // Text import: transcript is ready now, so run extraction immediately.
+      // ignore: unawaited_futures
+      ExtractionService.instance.pump(db);
     }
     if (existingId == null) {
       await Navigator.of(context).push(MaterialPageRoute(

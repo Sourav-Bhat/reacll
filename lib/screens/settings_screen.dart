@@ -4,6 +4,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 
 import '../main.dart';
 import '../services/extraction_service.dart';
+import '../services/local_llm_service.dart';
 import '../services/sample_data.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -16,6 +17,8 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   late final TextEditingController _keyCtl;
   late final TextEditingController _geminiCtl;
+  late final TextEditingController _modelUrlCtl;
+  late final TextEditingController _hfTokenCtl;
   String _provider = 'anthropic';
   bool _sampleLoaded = false;
   String _version = '';
@@ -27,8 +30,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
         text: db.getSetting(ExtractionService.settingApiKey) ?? '');
     _geminiCtl = TextEditingController(
         text: db.getSetting(ExtractionService.settingGeminiKey) ?? '');
+    _modelUrlCtl = TextEditingController(
+        text: db.getSetting(LocalLlmService.settingModelUrl) ?? '');
+    _hfTokenCtl = TextEditingController(
+        text: db.getSetting(LocalLlmService.settingHfToken) ?? '');
     _provider = db.getSetting(ExtractionService.settingProvider) ?? 'anthropic';
     _sampleLoaded = SampleData.isLoaded(db);
+    LocalLlmService.instance.addListener(_onLocal);
     PackageInfo.fromPlatform().then((i) {
       if (mounted) {
         setState(() => _version = 'v${i.version}+${i.buildNumber}');
@@ -36,10 +44,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
     });
   }
 
+  void _onLocal() {
+    if (mounted) setState(() {});
+  }
+
   @override
   void dispose() {
+    LocalLlmService.instance.removeListener(_onLocal);
     _keyCtl.dispose();
     _geminiCtl.dispose();
+    _modelUrlCtl.dispose();
+    _hfTokenCtl.dispose();
     super.dispose();
   }
 
@@ -91,22 +106,93 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 borderRadius: BorderRadius.circular(14)),
             padding: const EdgeInsets.all(3),
             child: Row(children: [
-              _provTab(t, 'anthropic', 'Anthropic (Claude)'),
+              _provTab(t, 'anthropic', 'Anthropic'),
               _provTab(t, 'gemini', 'Gemini'),
+              _provTab(t, 'local', 'Local'),
             ]),
           ),
           const SizedBox(height: 14),
-          TextField(
-            controller: _provider == 'gemini' ? _geminiCtl : _keyCtl,
-            obscureText: true,
-            decoration: InputDecoration(
-              labelText:
-                  _provider == 'gemini' ? 'Gemini API key' : 'Anthropic API key',
-              hintText: _provider == 'gemini' ? 'AIza…' : 'sk-ant-…',
-              border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(18)),
+          if (_provider == 'local') ...[
+            Text(
+                'Runs Gemma fully on-device — nothing (not even transcript text) '
+                'leaves your phone. Download the model once (~1 GB).',
+                style: t.textTheme.bodySmall?.copyWith(
+                    color: t.colorScheme.onSurfaceVariant, height: 1.5)),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _modelUrlCtl,
+              decoration: InputDecoration(
+                labelText: 'Model URL (.task) — optional',
+                hintText: 'blank = default Gemma 3 1B',
+                border:
+                    OutlineInputBorder(borderRadius: BorderRadius.circular(18)),
+              ),
             ),
-          ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: _hfTokenCtl,
+              obscureText: true,
+              decoration: InputDecoration(
+                labelText: 'Hugging Face token (if the model is gated)',
+                border:
+                    OutlineInputBorder(borderRadius: BorderRadius.circular(18)),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Builder(builder: (_) {
+              final local = LocalLlmService.instance;
+              if (local.isDownloading) {
+                final pct = ((local.downloadProgress ?? 0) * 100).round();
+                return Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      LinearProgressIndicator(value: local.downloadProgress),
+                      const SizedBox(height: 6),
+                      Text('Downloading model… $pct%',
+                          textAlign: TextAlign.center,
+                          style: t.textTheme.bodySmall),
+                    ]);
+              }
+              final installed = local.isInstalled(db);
+              return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    if (installed)
+                      Text('✓ Model ready — extraction & Ask run offline.',
+                          style: t.textTheme.bodySmall
+                              ?.copyWith(color: t.colorScheme.primary)),
+                    if (local.lastError != null)
+                      Text(local.lastError!,
+                          style: t.textTheme.bodySmall
+                              ?.copyWith(color: t.colorScheme.error)),
+                    const SizedBox(height: 8),
+                    OutlinedButton.icon(
+                      onPressed: () async {
+                        db.setSetting(LocalLlmService.settingModelUrl,
+                            _modelUrlCtl.text.trim());
+                        db.setSetting(LocalLlmService.settingHfToken,
+                            _hfTokenCtl.text.trim());
+                        await LocalLlmService.instance.download(db);
+                      },
+                      icon: const Icon(Icons.download),
+                      label:
+                          Text(installed ? 'Re-download model' : 'Download model'),
+                    ),
+                  ]);
+            }),
+          ] else
+            TextField(
+              controller: _provider == 'gemini' ? _geminiCtl : _keyCtl,
+              obscureText: true,
+              decoration: InputDecoration(
+                labelText: _provider == 'gemini'
+                    ? 'Gemini API key'
+                    : 'Anthropic API key',
+                hintText: _provider == 'gemini' ? 'AIza…' : 'sk-ant-…',
+                border:
+                    OutlineInputBorder(borderRadius: BorderRadius.circular(18)),
+              ),
+            ),
           const SizedBox(height: 16),
           FilledButton(
             onPressed: () {
@@ -115,9 +201,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ExtractionService.settingApiKey, _keyCtl.text.trim());
               db.setSetting(
                   ExtractionService.settingGeminiKey, _geminiCtl.text.trim());
+              db.setSetting(
+                  LocalLlmService.settingModelUrl, _modelUrlCtl.text.trim());
+              db.setSetting(
+                  LocalLlmService.settingHfToken, _hfTokenCtl.text.trim());
               ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(content: Text('Saved')));
-              // Anything skipped earlier can now be extracted.
               // ignore: unawaited_futures
               ExtractionService.instance.pump(db);
             },

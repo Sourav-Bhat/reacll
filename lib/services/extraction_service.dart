@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import '../db/database.dart';
+import 'local_llm_service.dart';
 
 /// FR-9 + FR-11 + W6/W7/W8/W13: structured extraction (TEXT ONLY — audio never
 /// leaves the device). Produces a summary, a conversation type/bucket, typed
@@ -70,6 +71,7 @@ Rules:
   Future<void> pump(RecallDb db) async {
     if (_running) return;
     final provider = db.getSetting(settingProvider) ?? 'anthropic';
+    final isLocal = provider == 'local';
     final apiKey = provider == 'gemini'
         ? db.getSetting(settingGeminiKey)
         : db.getSetting(settingApiKey);
@@ -77,7 +79,13 @@ Rules:
     notifyListeners();
     try {
       for (final convId in db.pendingExtractions()) {
-        if (apiKey == null || apiKey.isEmpty) {
+        if (isLocal) {
+          if (!LocalLlmService.instance.isInstalled(db)) {
+            db.setExtractionStatus(convId, 'skipped',
+                error: 'On-device Gemma model not downloaded');
+            continue;
+          }
+        } else if (apiKey == null || apiKey.isEmpty) {
           db.setExtractionStatus(convId, 'skipped',
               error: 'No ${provider == 'gemini' ? 'Gemini' : 'Anthropic'} API key');
           continue;
@@ -90,9 +98,16 @@ Rules:
             db.setExtractionStatus(convId, 'skipped', error: 'No transcript');
             continue;
           }
-          final json = provider == 'gemini'
-              ? await _callGemini(apiKey, detail.transcriptText)
-              : await _callClaude(apiKey, detail.transcriptText);
+          final Map<String, dynamic> json;
+          if (isLocal) {
+            json = parseModelJson(await LocalLlmService.instance.complete(db,
+                system: _systemPrompt,
+                user: 'Transcript:\n\n${detail.transcriptText}'));
+          } else if (provider == 'gemini') {
+            json = await _callGemini(apiKey!, detail.transcriptText);
+          } else {
+            json = await _callClaude(apiKey!, detail.transcriptText);
+          }
           _store(db, convId, json);
           db.setExtractionStatus(convId, 'done');
         } catch (e) {
@@ -119,6 +134,9 @@ Rules:
   Future<String> complete(RecallDb db,
       {required String system, required String user}) async {
     final provider = db.getSetting(settingProvider) ?? 'anthropic';
+    if (provider == 'local') {
+      return LocalLlmService.instance.complete(db, system: system, user: user);
+    }
     final apiKey = provider == 'gemini'
         ? db.getSetting(settingGeminiKey)
         : db.getSetting(settingApiKey);
