@@ -106,7 +106,32 @@ Rules:
     }
   }
 
-  Future<Map<String, dynamic>> _callClaude(String apiKey, String transcript) async {
+  Future<Map<String, dynamic>> _callClaude(String apiKey, String transcript) async =>
+      parseModelJson(
+          await _rawClaude(apiKey, _systemPrompt, 'Transcript:\n\n$transcript'));
+
+  Future<Map<String, dynamic>> _callGemini(String apiKey, String transcript) async =>
+      parseModelJson(
+          await _rawGemini(apiKey, _systemPrompt, 'Transcript:\n\n$transcript'));
+
+  /// Public single-shot completion for the Ask / RAG feature. Uses the user's
+  /// selected provider + key, returns raw model text.
+  Future<String> complete(RecallDb db,
+      {required String system, required String user}) async {
+    final provider = db.getSetting(settingProvider) ?? 'anthropic';
+    final apiKey = provider == 'gemini'
+        ? db.getSetting(settingGeminiKey)
+        : db.getSetting(settingApiKey);
+    if (apiKey == null || apiKey.isEmpty) {
+      throw Exception(
+          'No ${provider == 'gemini' ? 'Gemini' : 'Anthropic'} API key set in Settings');
+    }
+    return provider == 'gemini'
+        ? _rawGemini(apiKey, system, user)
+        : _rawClaude(apiKey, system, user);
+  }
+
+  Future<String> _rawClaude(String apiKey, String system, String user) async {
     final resp = await http
         .post(
           Uri.parse(_anthropicEndpoint),
@@ -118,9 +143,9 @@ Rules:
           body: jsonEncode({
             'model': _anthropicModel,
             'max_tokens': 2000,
-            'system': _systemPrompt,
+            'system': system,
             'messages': [
-              {'role': 'user', 'content': 'Transcript:\n\n$transcript'}
+              {'role': 'user', 'content': user}
             ],
           }),
         )
@@ -129,12 +154,11 @@ Rules:
       throw Exception('Anthropic ${resp.statusCode}: ${resp.body}');
     }
     final body = jsonDecode(resp.body) as Map<String, dynamic>;
-    final text = ((body['content'] as List).first
+    return ((body['content'] as List).first
         as Map<String, dynamic>)['text'] as String;
-    return parseModelJson(text);
   }
 
-  Future<Map<String, dynamic>> _callGemini(String apiKey, String transcript) async {
+  Future<String> _rawGemini(String apiKey, String system, String user) async {
     final url =
         'https://generativelanguage.googleapis.com/v1beta/models/$_geminiModel:generateContent?key=$apiKey';
     final resp = await http
@@ -144,20 +168,17 @@ Rules:
           body: jsonEncode({
             'system_instruction': {
               'parts': [
-                {'text': _systemPrompt}
+                {'text': system}
               ]
             },
             'contents': [
               {
                 'parts': [
-                  {'text': 'Transcript:\n\n$transcript'}
+                  {'text': user}
                 ]
               }
             ],
-            'generationConfig': {
-              'maxOutputTokens': 2048,
-              'responseMimeType': 'application/json',
-            },
+            'generationConfig': {'maxOutputTokens': 2048},
           }),
         )
         .timeout(const Duration(seconds: 90));
@@ -166,10 +187,8 @@ Rules:
     }
     final body = jsonDecode(resp.body) as Map<String, dynamic>;
     final cand = (body['candidates'] as List).first as Map<String, dynamic>;
-    final parts =
-        (cand['content'] as Map<String, dynamic>)['parts'] as List;
-    final text = (parts.first as Map<String, dynamic>)['text'] as String;
-    return parseModelJson(text);
+    final parts = (cand['content'] as Map<String, dynamic>)['parts'] as List;
+    return (parts.first as Map<String, dynamic>)['text'] as String;
   }
 
   /// Robust parse: tolerates code fences and stray prose around the JSON.

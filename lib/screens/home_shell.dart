@@ -6,6 +6,7 @@ import '../main.dart';
 import '../services/import_service.dart';
 import '../services/transcription_service.dart';
 import 'add_screen.dart';
+import 'ask_screen.dart';
 import 'attach_picker.dart';
 import 'home_screen.dart';
 import 'people_screen.dart';
@@ -68,11 +69,12 @@ class _HomeShellState extends State<HomeShell> {
     final pages = [
       HomeScreen(onChanged: () => setState(() {})),
       PeopleScreen(onChanged: () => setState(() {})),
+      const AskScreen(),
       AddScreen(onImported: () => setState(() {})),
     ];
     return Scaffold(
       body: pages[_tab],
-      floatingActionButton: _tab == 2
+      floatingActionButton: (_tab == 2 || _tab == 3)
           ? null
           : FloatingActionButton.large(
               onPressed: _startRecording,
@@ -92,6 +94,10 @@ class _HomeShellState extends State<HomeShell> {
               icon: Icon(Icons.people_outline),
               selectedIcon: Icon(Icons.people),
               label: 'People'),
+          NavigationDestination(
+              icon: Icon(Icons.auto_awesome_outlined),
+              selectedIcon: Icon(Icons.auto_awesome),
+              label: 'Ask'),
           NavigationDestination(
               icon: Icon(Icons.add_circle_outline),
               selectedIcon: Icon(Icons.add_circle),
