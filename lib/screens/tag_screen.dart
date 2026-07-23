@@ -17,6 +17,20 @@ class _TagScreenState extends State<TagScreen> {
   final _topicCtl = TextEditingController();
 
   @override
+  void initState() {
+    super.initState();
+    // W3: pre-select people already tagged and pre-fill the topic so editing
+    // tags shows what I already entered instead of asking again.
+    final d = db.detail(widget.conversationId);
+    for (final p in d.people) {
+      _selected.add(p.id);
+    }
+    if (d.title != 'Untitled conversation' && d.title != 'Imported transcript') {
+      _topicCtl.text = d.title;
+    }
+  }
+
+  @override
   void dispose() {
     _topicCtl.dispose();
     super.dispose();

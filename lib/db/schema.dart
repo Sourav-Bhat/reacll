@@ -3,7 +3,7 @@
 /// so keep it standard SQL (no Dart interpolation).
 library;
 
-const schemaVersion = 4;
+const schemaVersion = 5;
 
 const createSchema = '''
 PRAGMA foreign_keys = ON;
@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS conversations (
   title         TEXT NOT NULL DEFAULT 'Untitled conversation',
   happened_at   TEXT NOT NULL DEFAULT (datetime('now')),
   duration_sec  INTEGER NOT NULL DEFAULT 0,
+  notes         TEXT,
   created_at    TEXT NOT NULL DEFAULT (datetime('now'))
 );
 

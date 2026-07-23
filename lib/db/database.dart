@@ -115,6 +115,32 @@ class RecallDb {
     }
   }
 
+  /// W12: delete a conversation and everything hanging off it (artifacts,
+  /// transcripts, facts, segments, tags…) via ON DELETE CASCADE.
+  void deleteConversation(int id) {
+    _db.execute('PRAGMA foreign_keys = ON');
+    _db.execute('DELETE FROM conversations WHERE id = ?', [id]);
+  }
+
+  /// W4: personal notes on a conversation.
+  void setConversationNotes(int id, String notes) {
+    _db.execute('UPDATE conversations SET notes = ? WHERE id = ?',
+        [notes.trim().isEmpty ? null : notes.trim(), id]);
+  }
+
+  /// W1: the owner ("Me") — always a participant. Created once, id cached in
+  /// settings, tagged on every new recording/import.
+  int mePersonId() {
+    final saved = getSetting('me_person_id');
+    if (saved != null) {
+      final exists = _db.select('SELECT 1 FROM people WHERE id = ?', [int.parse(saved)]);
+      if (exists.isNotEmpty) return int.parse(saved);
+    }
+    final id = createPerson(name: 'Me');
+    setSetting('me_person_id', '$id');
+    return id;
+  }
+
   List<ConversationSummary> homeList({int limit = 100, int offset = 0}) {
     final rows = _db.select(homeListSql, [limit, offset]);
     return rows.map(_summaryFromRow).toList();
@@ -131,7 +157,8 @@ class RecallDb {
 
   ConversationDetail detail(int id) {
     final c = _db.select(
-        'SELECT id, title, happened_at, duration_sec FROM conversations WHERE id = ?', [id]).first;
+        'SELECT id, title, happened_at, duration_sec, notes FROM conversations WHERE id = ?',
+        [id]).first;
     List<Person> peopleByRole(String role) => _db
         .select(
             'SELECT p.id, p.name, p.company, p.role FROM people p '
@@ -178,6 +205,7 @@ class RecallDb {
       title: c['title'] as String,
       happenedAt: DateTime.parse(c['happened_at'] as String),
       durationSec: (c['duration_sec'] as int?) ?? 0,
+      notes: c['notes'] as String?,
       people: people,
       mentioned: mentioned,
       topics: topics,

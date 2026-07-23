@@ -42,8 +42,17 @@ final Map<int, void Function(Database db)> migrations = {
     db.execute(createSchema); // recreate at the v4 shape
   },
 
-  // Template for the next one (delete this comment when you add a real v5):
-  // 5: (db) {
-  //   db.execute('ALTER TABLE people ADD COLUMN avatar_path TEXT');
-  // },
+  // v4 -> v5: personal notes on a conversation (additive).
+  // Defensive: the v4 rebuild recreates via createSchema (latest shape), which
+  // already has `notes`, so only add the column if it's missing. Follow this
+  // guard pattern for every future ADD COLUMN migration.
+  5: (db) {
+    final cols = db
+        .select('PRAGMA table_info(conversations)')
+        .map((r) => r['name'] as String)
+        .toSet();
+    if (!cols.contains('notes')) {
+      db.execute('ALTER TABLE conversations ADD COLUMN notes TEXT');
+    }
+  },
 };

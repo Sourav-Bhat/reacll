@@ -14,11 +14,13 @@ class IncomingItem {
   final String? filePath; // audio file copied into app storage
   final String? text; // transcript text
   final String suggestedTitle;
+  final DateTime? happenedAt; // W2: the file's real date, when known
   const IncomingItem({
     required this.kind,
     this.filePath,
     this.text,
     required this.suggestedTitle,
+    this.happenedAt,
   });
 }
 
@@ -61,11 +63,13 @@ class ImportService {
     }
     final ext = p.extension(f.path).toLowerCase();
     if (_audioExt.contains(ext)) {
+      final when = await _fileDate(f.path);
       final copied = await _copyIntoMedia(f.path);
       _controller.add(IncomingItem(
         kind: 'audio',
         filePath: copied,
         suggestedTitle: p.basenameWithoutExtension(f.path),
+        happenedAt: when,
       ));
     } else if (ext == '.txt' || ext == '.md' || ext == '.vtt' || ext == '.srt') {
       final text = await File(f.path).readAsString();
@@ -73,6 +77,7 @@ class ImportService {
         kind: 'text',
         text: text,
         suggestedTitle: p.basenameWithoutExtension(f.path),
+        happenedAt: await _fileDate(f.path),
       ));
     }
   }
@@ -82,12 +87,39 @@ class ImportService {
     final res = await FilePicker.platform.pickFiles(type: FileType.audio);
     final path = res?.files.single.path;
     if (path == null) return null;
+    final when = await _fileDate(path);
     final copied = await _copyIntoMedia(path);
     return IncomingItem(
       kind: 'audio',
       filePath: copied,
       suggestedTitle: p.basenameWithoutExtension(path),
+      happenedAt: when,
     );
+  }
+
+  /// W10: pick a transcript text file (.txt/.vtt/.srt/.md) from storage.
+  Future<IncomingItem?> pickTranscriptFile() async {
+    final res = await FilePicker.platform.pickFiles(
+        type: FileType.custom, allowedExtensions: ['txt', 'vtt', 'srt', 'md']);
+    final path = res?.files.single.path;
+    if (path == null) return null;
+    final text = await File(path).readAsString();
+    if (text.trim().isEmpty) return null;
+    return IncomingItem(
+      kind: 'text',
+      text: text,
+      suggestedTitle: p.basenameWithoutExtension(path),
+      happenedAt: await _fileDate(path),
+    );
+  }
+
+  /// The file's last-modified date, or null if unavailable.
+  Future<DateTime?> _fileDate(String path) async {
+    try {
+      return await File(path).lastModified();
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<String> _copyIntoMedia(String src) async {
@@ -104,8 +136,11 @@ class ImportService {
   /// FR-4: attach an incoming item to a conversation (new or existing).
   /// Returns (conversationId, needsTranscription).
   (int, bool) attach(RecallDb db, IncomingItem item, {int? conversationId}) {
+    final isNew = conversationId == null;
     final convId = conversationId ??
-        db.createConversation(title: item.suggestedTitle);
+        db.createConversation(
+            title: item.suggestedTitle, happenedAt: item.happenedAt);
+    if (isNew) db.tagPerson(convId, db.mePersonId()); // W1: I'm always present
     if (item.kind == 'audio') {
       db.addArtifact(convId, 'imported_audio',
           filePath: item.filePath, status: 'pending');

@@ -68,6 +68,7 @@ class ConversationDetail {
   final String title;
   final DateTime happenedAt;
   final int durationSec;
+  final String? notes; // W4: personal notes
   final List<Person> people; // attendees
   final List<Person> mentioned; // referenced only, not present
   final List<String> topics;
@@ -78,6 +79,7 @@ class ConversationDetail {
     required this.title,
     required this.happenedAt,
     required this.durationSec,
+    this.notes,
     required this.people,
     this.mentioned = const [],
     required this.topics,

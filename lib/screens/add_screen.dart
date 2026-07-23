@@ -18,29 +18,17 @@ class AddScreen extends StatelessWidget {
     await _attachAndTag(context, item);
   }
 
+  /// W10: import a transcript text file (.txt/.vtt/.srt/.md).
+  Future<void> _importTranscriptFile(BuildContext context) async {
+    final item = await ImportService.instance.pickTranscriptFile();
+    if (item == null || !context.mounted) return;
+    await _attachAndTag(context, item);
+  }
+
+  /// W11: full-screen paste so long transcripts aren't truncated.
   Future<void> _pasteTranscript(BuildContext context) async {
-    final ctl = TextEditingController();
-    final text = await showDialog<String>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Paste transcript'),
-        content: TextField(
-          controller: ctl,
-          autofocus: true,
-          maxLines: 10,
-          decoration: const InputDecoration(
-              hintText: 'Paste the transcript text here…'),
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel')),
-          FilledButton(
-              onPressed: () => Navigator.pop(context, ctl.text),
-              child: const Text('Import')),
-        ],
-      ),
-    );
+    final text = await Navigator.of(context).push<String>(
+        MaterialPageRoute(builder: (_) => const PasteTranscriptScreen()));
     if (text == null || text.trim().isEmpty || !context.mounted) return;
     await _attachAndTag(
         context,
@@ -157,8 +145,12 @@ class AddScreen extends StatelessWidget {
               'Audio file', 'From Google Recorder, Voice Memos…',
               () => _importAudio(context)),
           const SizedBox(height: 12),
+          tile(Icons.upload_file, t.colorScheme.surfaceContainerHighest,
+              'Upload transcript file', '.txt / .vtt / .srt — Meet, Teams export',
+              () => _importTranscriptFile(context)),
+          const SizedBox(height: 12),
           tile(Icons.description_outlined, const Color(0xFFE4EBE0),
-              'Paste a transcript', 'Copied from Teams, or any text',
+              'Paste a transcript', 'Any length — copied from Teams or anywhere',
               () => _pasteTranscript(context)),
           const SizedBox(height: 12),
           tile(Icons.lock_outline, t.colorScheme.surfaceContainerHighest,
@@ -174,6 +166,55 @@ class AddScreen extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// W11: full-screen transcript paste — unlimited length.
+class PasteTranscriptScreen extends StatefulWidget {
+  const PasteTranscriptScreen({super.key});
+  @override
+  State<PasteTranscriptScreen> createState() => _PasteTranscriptScreenState();
+}
+
+class _PasteTranscriptScreenState extends State<PasteTranscriptScreen> {
+  final _ctl = TextEditingController();
+
+  @override
+  void dispose() {
+    _ctl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context);
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Paste transcript'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(_ctl.text),
+            child: const Text('Import'),
+          ),
+        ],
+      ),
+      body: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+        child: TextField(
+          controller: _ctl,
+          autofocus: true,
+          maxLines: null,
+          expands: true,
+          keyboardType: TextInputType.multiline,
+          textAlignVertical: TextAlignVertical.top,
+          decoration: const InputDecoration(
+            hintText: 'Paste the full transcript here — any length…',
+            border: InputBorder.none,
+          ),
+          style: t.textTheme.bodyLarge?.copyWith(height: 1.5),
+        ),
       ),
     );
   }

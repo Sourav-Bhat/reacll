@@ -126,6 +126,63 @@ class _DetailScreenState extends State<DetailScreen> {
     if (mounted) setState(() {});
   }
 
+  /// W12: delete the whole conversation.
+  Future<void> _deleteConversation() async {
+    final t = Theme.of(context);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete conversation?'),
+        content: const Text(
+            'Removes the recording, transcript and everything extracted from '
+            'it. This cannot be undone.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel')),
+          FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: t.colorScheme.error),
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Delete')),
+        ],
+      ),
+    );
+    if (ok == true) {
+      db.deleteConversation(widget.conversationId);
+      if (mounted) Navigator.of(context).pop();
+    }
+  }
+
+  /// W4: edit personal notes.
+  Future<void> _editNotes(String? current) async {
+    final ctl = TextEditingController(text: current ?? '');
+    final saved = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Notes'),
+        content: TextField(
+          controller: ctl,
+          autofocus: true,
+          maxLines: 6,
+          decoration: const InputDecoration(
+              hintText: 'Your own notes about this conversation…'),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel')),
+          FilledButton(
+              onPressed: () => Navigator.pop(context, ctl.text),
+              child: const Text('Save')),
+        ],
+      ),
+    );
+    if (saved != null) {
+      db.setConversationNotes(widget.conversationId, saved);
+      setState(() {});
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context);
@@ -135,7 +192,16 @@ class _DetailScreenState extends State<DetailScreen> {
     final failed = d.artifacts.where((a) => a.status == 'failed').toList();
 
     return Scaffold(
-      appBar: AppBar(backgroundColor: Colors.transparent),
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.delete_outline),
+            tooltip: 'Delete conversation',
+            onPressed: _deleteConversation,
+          ),
+        ],
+      ),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(22, 0, 22, 40),
         children: [
@@ -216,6 +282,41 @@ class _DetailScreenState extends State<DetailScreen> {
                   .toList(),
             ),
           ],
+          const SizedBox(height: 14),
+          // W4: personal notes
+          InkWell(
+            onTap: () => _editNotes(d.notes),
+            borderRadius: BorderRadius.circular(16),
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: t.colorScheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(Icons.sticky_note_2_outlined,
+                      size: 18, color: t.colorScheme.primary),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      (d.notes == null || d.notes!.isEmpty)
+                          ? 'Add your notes…'
+                          : d.notes!,
+                      style: t.textTheme.bodyMedium?.copyWith(
+                          height: 1.4,
+                          color: (d.notes == null || d.notes!.isEmpty)
+                              ? t.colorScheme.onSurfaceVariant
+                              : t.colorScheme.onSurface),
+                    ),
+                  ),
+                  Icon(Icons.edit, size: 15, color: t.colorScheme.onSurfaceVariant),
+                ],
+              ),
+            ),
+          ),
           const SizedBox(height: 18),
           if (busy)
             Card(
@@ -243,7 +344,7 @@ class _DetailScreenState extends State<DetailScreen> {
                     child: FilledButton.tonal(
                       onPressed: () async {
                         await TranscriptionService.instance.retry(db, a.id);
-                        setState(() {});
+                        if (mounted) setState(() {});
                       },
                       child: const Text('Retry'),
                     ),

@@ -59,6 +59,7 @@ class _RecordScreenState extends State<RecordScreen> {
       return;
     }
     final convId = db.createConversation(durationSec: duration.inSeconds);
+    db.tagPerson(convId, db.mePersonId()); // W1: I'm always in my own recordings
     db.addArtifact(convId, 'recording', filePath: path, status: 'pending');
     // Transcribe in background; user goes straight to the 10-second tag flow.
     // ignore: unawaited_futures
