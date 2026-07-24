@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../main.dart';
 import '../models.dart';
@@ -179,6 +180,31 @@ class _DetailScreenState extends State<DetailScreen> {
     }
   }
 
+  /// Re-run extraction (e.g. after switching LLM/provider).
+  void _reExtract() {
+    db.clearExtraction(widget.conversationId);
+    db.queueExtraction(widget.conversationId);
+    // ignore: unawaited_futures
+    ExtractionService.instance.pump(db);
+    setState(() {});
+    ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Re-extracting memory…')));
+  }
+
+  /// Re-transcribe the audio from scratch.
+  void _reTranscribe() {
+    db.resetForRetranscribe(widget.conversationId);
+    // ignore: unawaited_futures
+    TranscriptionService.instance.pump(db);
+    setState(() {});
+    ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Re-transcribing on device…')));
+  }
+
+  Future<void> _shareTranscript(String text) => Share.share(text);
+
+  Future<void> _shareAudio(String path) => Share.shareXFiles([XFile(path)]);
+
   // ---------------- small building blocks ----------------
 
   Widget _sectionHeader(ThemeData t, String label, Color color) => Padding(
@@ -274,12 +300,12 @@ class _DetailScreenState extends State<DetailScreen> {
         if (busy)
           const Card(
             child: ListTile(
-              leading: const SizedBox(
+              leading: SizedBox(
                   width: 22,
                   height: 22,
                   child: CircularProgressIndicator(strokeWidth: 2.5)),
-              title: const Text('Transcribing on your phone…'),
-              subtitle: const Text('Your audio never leaves the device.'),
+              title: Text('Transcribing on your phone…'),
+              subtitle: Text('Your audio never leaves the device.'),
             ),
           ),
         ...failed.map((a) => Card(
@@ -489,12 +515,12 @@ class _DetailScreenState extends State<DetailScreen> {
           const SizedBox(height: 12),
           const Card(
             child: ListTile(
-              leading: const SizedBox(
+              leading: SizedBox(
                   width: 22,
                   height: 22,
                   child: CircularProgressIndicator(strokeWidth: 2.5)),
-              title: const Text('Transcribing on your phone…'),
-              subtitle: const Text('Memory appears once the transcript is ready.'),
+              title: Text('Transcribing on your phone…'),
+              subtitle: Text('Memory appears once the transcript is ready.'),
             ),
           ),
         ],
@@ -646,10 +672,42 @@ class _DetailScreenState extends State<DetailScreen> {
           title: Text(d.title,
               style: t.textTheme.titleLarge, overflow: TextOverflow.ellipsis),
           actions: [
-            IconButton(
-              icon: const Icon(Icons.delete_outline),
-              tooltip: 'Delete conversation',
-              onPressed: _deleteConversation,
+            PopupMenuButton<String>(
+              onSelected: (v) {
+                switch (v) {
+                  case 'reextract':
+                    _reExtract();
+                    break;
+                  case 'retranscribe':
+                    _reTranscribe();
+                    break;
+                  case 'sharetx':
+                    _shareTranscript(d.transcriptText);
+                    break;
+                  case 'shareaudio':
+                    final p = db.audioPath(d.id);
+                    if (p != null) _shareAudio(p);
+                    break;
+                  case 'delete':
+                    _deleteConversation();
+                    break;
+                }
+              },
+              itemBuilder: (context) => [
+                const PopupMenuItem(
+                    value: 'reextract', child: Text('Re-extract memory')),
+                if (db.hasAudio(d.id))
+                  const PopupMenuItem(
+                      value: 'retranscribe', child: Text('Re-transcribe')),
+                if (d.transcriptText.isNotEmpty)
+                  const PopupMenuItem(
+                      value: 'sharetx', child: Text('Share transcript')),
+                if (db.hasAudio(d.id))
+                  const PopupMenuItem(
+                      value: 'shareaudio', child: Text('Share audio')),
+                const PopupMenuItem(
+                    value: 'delete', child: Text('Delete conversation')),
+              ],
             ),
           ],
           bottom: const TabBar(

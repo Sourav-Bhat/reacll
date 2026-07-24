@@ -84,8 +84,18 @@ class LocalLlmService extends ChangeNotifier {
     downloadProgress = 0;
     notifyListeners();
     try {
+      // Gated models (Gemma) need the HF token wired into the plugin before the
+      // download request is made.
+      if (m.gated && token != null && token.isNotEmpty) {
+        try {
+          FlutterGemma.initialize(
+              huggingFaceToken: token, maxDownloadRetries: 5);
+        } catch (_) {}
+      }
+      // flutter_gemma passes the percent (0-100) as a plain number.
       void onProg(dynamic p) {
-        downloadProgress = ((p.percentage as num?) ?? 0).toDouble() / 100.0;
+        final pct = (p is num) ? p.toDouble() : 0.0;
+        downloadProgress = (pct / 100.0).clamp(0.0, 1.0);
         notifyListeners();
       }
 
@@ -122,8 +132,12 @@ class LocalLlmService extends ChangeNotifier {
     try {
       final chat = await model.createChat(systemInstruction: system);
       await chat.addQueryChunk(Message.text(text: user, isUser: true));
-      final response = await chat.generateChatResponse();
-      return response.toString();
+      // Stream the response and accumulate text tokens (documented API).
+      final buffer = StringBuffer();
+      await for (final r in chat.generateChatResponseAsync()) {
+        if (r is TextResponse) buffer.write(r.token);
+      }
+      return buffer.toString().trim();
     } finally {
       await model.close();
     }

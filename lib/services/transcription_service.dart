@@ -19,9 +19,25 @@ class TranscriptionService extends ChangeNotifier {
 
   final WhisperController _whisper = WhisperController();
 
-  /// tiny = fast first-run default; user can switch to small in settings later.
-  WhisperModel model = WhisperModel.base;
+  static const settingModel = 'whisper_model'; // 'tiny' | 'base' | 'small'
+
+  /// tiny = fast default (recommended by whisper_ggml); base/small are slower
+  /// but more accurate. Settings lets the user switch.
+  WhisperModel model = WhisperModel.tiny;
   String language = 'en';
+
+  void setModel(String name) {
+    switch (name) {
+      case 'base':
+        model = WhisperModel.base;
+        break;
+      case 'small':
+        model = WhisperModel.small;
+        break;
+      default:
+        model = WhisperModel.tiny;
+    }
+  }
 
   bool _running = false;
   int? activeArtifactId;

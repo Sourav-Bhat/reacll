@@ -6,6 +6,7 @@ import '../main.dart';
 import '../services/extraction_service.dart';
 import '../services/local_llm_service.dart';
 import '../services/sample_data.dart';
+import '../services/transcription_service.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -20,6 +21,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late final TextEditingController _hfTokenCtl;
   String _provider = 'anthropic';
   String _secondary = 'none';
+  String _whisperModel = 'tiny';
   bool _sampleLoaded = false;
   String _version = '';
 
@@ -34,6 +36,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         text: db.getSetting(LocalLlmService.settingHfToken) ?? '');
     _provider = db.getSetting(ExtractionService.settingProvider) ?? 'anthropic';
     _secondary = db.getSetting(ExtractionService.settingSecondary) ?? 'none';
+    _whisperModel = db.getSetting(TranscriptionService.settingModel) ?? 'tiny';
     _sampleLoaded = SampleData.isLoaded(db);
     LocalLlmService.instance.addListener(_onLocal);
     PackageInfo.fromPlatform().then((i) {
@@ -273,7 +276,39 @@ class _SettingsScreenState extends State<SettingsScreen> {
             },
             child: const Text('Save'),
           ),
-          const SizedBox(height: 34),
+          const SizedBox(height: 30),
+          const Divider(),
+          const SizedBox(height: 12),
+          Text('Transcription', style: t.textTheme.titleMedium
+              ?.copyWith(fontWeight: FontWeight.w700)),
+          const SizedBox(height: 6),
+          Text(
+            'Whisper runs on-device. Tiny is fastest; Small is most accurate but '
+            'much slower. Long recordings still take several minutes — and a '
+            'release build is ~5× faster than a debug build.',
+            style: t.textTheme.bodySmall
+                ?.copyWith(color: t.colorScheme.onSurfaceVariant, height: 1.5),
+          ),
+          const SizedBox(height: 10),
+          Wrap(spacing: 8, children: [
+            for (final o in const [
+              ('tiny', 'Tiny — fastest'),
+              ('base', 'Base'),
+              ('small', 'Small — best')
+            ])
+              ChoiceChip(
+                label: Text(o.$2),
+                selected: _whisperModel == o.$1,
+                onSelected: (_) {
+                  setState(() => _whisperModel = o.$1);
+                  db.setSetting(TranscriptionService.settingModel, o.$1);
+                  TranscriptionService.instance.setModel(o.$1);
+                  // ignore: unawaited_futures
+                  TranscriptionService.instance.ensureModelReady();
+                },
+              ),
+          ]),
+          const SizedBox(height: 30),
           const Divider(),
           const SizedBox(height: 12),
           Text('Sample data', style: t.textTheme.titleMedium

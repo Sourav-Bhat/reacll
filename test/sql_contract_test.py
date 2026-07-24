@@ -208,6 +208,31 @@ db.execute('DELETE FROM conversations WHERE id=?', (cX,))
 check('T34 delete cascades tags',
       db.execute('SELECT count(*) FROM conversation_people WHERE conversation_id=?', (cX,)).fetchone()[0] == 0)
 
+# re-extract / re-transcribe (mirror of clearExtraction / resetForRetranscribe)
+cRe = conv('Re-run test', '2026-07-22 10:00')
+aRe = art(cRe, 'imported_audio', status='done', path='/x.wav')
+tx(aRe, cRe, 'some transcript text')
+fact(cRe, ravi, 'decision', 'a decision', '2026-07-22 10:00')
+db.execute("INSERT INTO clarifications (conversation_id,question) VALUES (?,?)", (cRe, 'q?'))
+db.execute("UPDATE conversations SET summary='s', bucket='1:1' WHERE id=?", (cRe,))
+db.execute("INSERT INTO extractions (conversation_id,status) VALUES (?,'done')", (cRe,))
+# clearExtraction
+db.execute('DELETE FROM facts WHERE conversation_id=?', (cRe,))
+db.execute('DELETE FROM clarifications WHERE conversation_id=?', (cRe,))
+db.execute('UPDATE conversations SET summary=NULL, bucket=NULL WHERE id=?', (cRe,))
+db.execute('DELETE FROM extractions WHERE conversation_id=?', (cRe,))
+check('T35 clearExtraction wipes memory',
+      db.execute('SELECT count(*) FROM facts WHERE conversation_id=?', (cRe,)).fetchone()[0] == 0
+      and db.execute('SELECT summary,bucket FROM conversations WHERE id=?', (cRe,)).fetchone() == (None, None))
+# resetForRetranscribe: transcript gone + audio re-queued
+db.execute('DELETE FROM transcripts WHERE conversation_id=?', (cRe,))
+db.execute("UPDATE artifacts SET status='pending' WHERE conversation_id=? AND kind IN ('recording','imported_audio')", (cRe,))
+check('T36 reset re-queues audio + clears transcript',
+      db.execute('SELECT count(*) FROM transcripts WHERE conversation_id=?', (cRe,)).fetchone()[0] == 0
+      and db.execute('SELECT status FROM artifacts WHERE id=?', (aRe,)).fetchone()[0] == 'pending')
+check('T37 hasAudio detects audio artifact',
+      db.execute("SELECT count(*) FROM artifacts WHERE conversation_id=? AND kind IN ('recording','imported_audio') AND file_path IS NOT NULL", (cRe,)).fetchone()[0] == 1)
+
 print()
 print('RESULT:', 'ALL PASS' if not fails else f'FAILURES: {fails}')
 sys.exit(1 if fails else 0)

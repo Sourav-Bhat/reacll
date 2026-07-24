@@ -257,6 +257,57 @@ class RecallDb {
         'UPDATE artifacts SET file_path = ? WHERE id = ?', [path, artifactId]);
   }
 
+  /// Re-run extraction: wipe the extracted memory (facts, clarifications,
+  /// summary, bucket) so a fresh pass (e.g. with a different LLM) can replace it.
+  void clearExtraction(int conversationId) {
+    _db.execute('DELETE FROM facts WHERE conversation_id = ?', [conversationId]);
+    _db.execute(
+        'DELETE FROM clarifications WHERE conversation_id = ?', [conversationId]);
+    _db.execute(
+        'UPDATE conversations SET summary = NULL, bucket = NULL WHERE id = ?',
+        [conversationId]);
+    _db.execute(
+        'DELETE FROM extractions WHERE conversation_id = ?', [conversationId]);
+  }
+
+  /// Re-transcribe: drop the old transcript + everything derived from it and
+  /// re-queue the audio artifacts. (No-op for transcript-only conversations.)
+  void resetForRetranscribe(int conversationId) {
+    _db.execute(
+        'DELETE FROM transcripts WHERE conversation_id = ?', [conversationId]);
+    clearExtraction(conversationId);
+    _db.execute(
+        'DELETE FROM segments WHERE conversation_id = ?', [conversationId]);
+    _db.execute('DELETE FROM speaker_clusters WHERE conversation_id = ?',
+        [conversationId]);
+    _db.execute(
+        'DELETE FROM diarizations WHERE artifact_id IN '
+        '(SELECT id FROM artifacts WHERE conversation_id = ?)',
+        [conversationId]);
+    _db.execute(
+        "UPDATE artifacts SET status = 'pending' WHERE conversation_id = ? "
+        "AND kind IN ('recording','imported_audio')",
+        [conversationId]);
+  }
+
+  /// True if the conversation has a re-transcribable audio artifact.
+  bool hasAudio(int conversationId) => _db
+      .select(
+          "SELECT 1 FROM artifacts WHERE conversation_id = ? "
+          "AND kind IN ('recording','imported_audio') AND file_path IS NOT NULL "
+          "LIMIT 1",
+          [conversationId])
+      .isNotEmpty;
+
+  String? audioPath(int conversationId) {
+    final r = _db.select(
+        "SELECT file_path FROM artifacts WHERE conversation_id = ? "
+        "AND kind IN ('recording','imported_audio') AND file_path IS NOT NULL "
+        "LIMIT 1",
+        [conversationId]);
+    return r.isEmpty ? null : r.first['file_path'] as String?;
+  }
+
   List<Artifact> pendingAudioArtifacts() {
     return _db
         .select("SELECT id, conversation_id, kind, file_path, status FROM artifacts "

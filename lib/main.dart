@@ -24,6 +24,9 @@ Future<void> main() async {
     // Non-fatal: local provider just won't be available until fixed.
   }
   await ImportService.instance.init();
+  // Load the chosen whisper model size (default tiny = fastest).
+  TranscriptionService.instance
+      .setModel(db.getSetting(TranscriptionService.settingModel) ?? 'tiny');
   // Warm the whisper model in the background; don't block first frame.
   // ignore: unawaited_futures
   TranscriptionService.instance.ensureModelReady();
